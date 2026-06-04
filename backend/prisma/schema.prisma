@@ -1,0 +1,39 @@
+// Schema Prisma — CMS de conteúdo com versionamento e rollback
+// Banco: PostgreSQL no Railway (DATABASE_URL injetada automaticamente)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Usuário do painel admin (autenticação JWT)
+model AdminUser {
+  id           String          @id @default(uuid())
+  username     String          @unique
+  passwordHash String
+  createdAt    DateTime        @default(now())
+  versions     ContentVersion[]
+}
+
+// Cada publicação gera uma nova versão imutável do conteúdo COMPLETO.
+// O conteúdo é guardado como JSON por seção (hero, sobre, etc.) dentro de `content`.
+// Rollback = promover o conteúdo de uma versão antiga como nova versão atual.
+model ContentVersion {
+  id         String     @id @default(uuid())
+  versionNum Int        @unique @default(autoincrement()) // v1, v2, v3... legível
+  content    Json       // { "hero": {...}, "sobre": {...}, "contato": {...} }
+  comment    String?    // mensagem opcional do autor ("ajustei o título do hero")
+  isCurrent  Boolean    @default(false) // qual versão está publicada agora
+  deploySha  String?    // SHA do commit que o GitHub gerou (rastreio do deploy)
+  createdAt  DateTime   @default(now())
+
+  authorId   String?
+  author     AdminUser? @relation(fields: [authorId], references: [id])
+
+  @@index([isCurrent])
+  @@index([createdAt])
+}
