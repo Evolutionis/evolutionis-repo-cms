@@ -6,8 +6,10 @@ async function bootstrap() {
 
   // CORS: libera o front do admin. Em produção, troque '*' pela URL do admin.
   app.enableCors({
-    origin: process.env.ADMIN_ORIGIN || '*',
-    methods: ['GET', 'POST'],
+    origin: process.env.ADMIN_ORIGIN || true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
   });
 
   // Railway injeta a porta via process.env.PORT

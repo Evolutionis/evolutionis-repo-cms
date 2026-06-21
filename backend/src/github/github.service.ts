@@ -1,4 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Commita o content.json no repositório via GitHub Contents API.
@@ -51,6 +53,14 @@ export class GithubService {
    * Retorna o SHA do commit gerado (para registrar no banco como deploySha).
    */
   async commitContent(content: unknown, message: string): Promise<string> {
+    const localSitePath = process.env.LOCAL_SITE_PATH;
+    if (localSitePath) {
+      const fullPath = path.join(localSitePath, this.path);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, JSON.stringify(content, null, 2), 'utf-8');
+      return `local-sha-${Date.now()}`;
+    }
+
     const sha = await this.getCurrentSha();
     const url = `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(
       this.path,
@@ -103,6 +113,14 @@ export class GithubService {
     const finalName = `${Date.now()}-${safe}`;
     const repoPath = `${dir}/${finalName}`;
 
+    const localSitePath = process.env.LOCAL_SITE_PATH;
+    if (localSitePath) {
+      const fullPath = path.join(localSitePath, repoPath);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, Buffer.from(base64Content, 'base64'));
+      return { path: repoPath, publicUrl: `${publicPrefix}/${finalName}` };
+    }
+
     const url = `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(
       repoPath,
     )}`;
@@ -133,6 +151,16 @@ export class GithubService {
   async listImages(): Promise<{ name: string; publicUrl: string }[]> {
     const dir = process.env.IMAGE_DIR || 'public/images';
     const publicPrefix = process.env.IMAGE_PUBLIC_PREFIX || '/images';
+
+    const localSitePath = process.env.LOCAL_SITE_PATH;
+    if (localSitePath) {
+      const fullPath = path.join(localSitePath, dir);
+      if (!fs.existsSync(fullPath)) return [];
+      const files = fs.readdirSync(fullPath);
+      return files
+        .filter(f => fs.statSync(path.join(fullPath, f)).isFile())
+        .map(f => ({ name: f, publicUrl: `${publicPrefix}/${f}` }));
+    }
     const url = `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(
       dir,
     )}?ref=${this.branch}`;

@@ -1,7 +1,7 @@
 // Cria o primeiro usuário admin.
 // Rode UMA vez após a migration, com as variáveis SEED_ADMIN_USER e SEED_ADMIN_PASS definidas.
 // No Railway: defina as variáveis e rode `npm run seed` via shell do serviço, ou localmente apontando pra DATABASE_URL.
-
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 

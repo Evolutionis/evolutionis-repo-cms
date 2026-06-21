@@ -1,0 +1,19 @@
+# Dependências
+node_modules/
+
+# Build gerado pelo Vite
+dist/
+
+# Variáveis locais e credenciais
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Arquivos do sistema
+.DS_Store
+
+# Estado local do deploy FTP
+.ftp-deploy-sync-state.json

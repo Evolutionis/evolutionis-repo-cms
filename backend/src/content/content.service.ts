@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { GithubService } from '../github/github.service';
 
@@ -98,7 +99,7 @@ export class ContentService {
       }),
       this.prisma.contentVersion.create({
         data: {
-          content,
+          content: content as Prisma.InputJsonValue,
           comment: message,
           isCurrent: true,
           deploySha,
