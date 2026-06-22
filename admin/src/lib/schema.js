@@ -3,38 +3,43 @@
 // Edite livremente para refletir o seu site.
 
 export const SECTION_SCHEMA = {
+  identidade: {
+    label: 'Identidade Visual',
+    fields: [
+      { key: 'logo', label: 'Logo Principal', type: 'image' },
+      { key: 'corPrimaria', label: 'Cor Primária (Botões e Destaques)', type: 'color' },
+      { key: 'corSecundaria', label: 'Cor Secundária (Fundo)', type: 'color' },
+      { key: 'corFundo', label: 'Cor do Fundo Principal', type: 'color' },
+      { key: 'corTexto', label: 'Cor do Texto', type: 'color' },
+    ],
+  },
+  cabecalho: {
+    label: 'Cabeçalho & Menu',
+    fields: [
+      { key: 'menu1', label: 'Item de Menu 1', type: 'text' },
+      { key: 'menu2', label: 'Item de Menu 2', type: 'text' },
+      { key: 'menu3', label: 'Item de Menu 3', type: 'text' },
+      { key: 'menu4', label: 'Item de Menu 4', type: 'text' },
+      { key: 'menu5', label: 'Item de Menu 5', type: 'text' },
+      { key: 'textoBotao', label: 'Botão de Contato', type: 'text' },
+    ],
+  },
   hero: {
-    label: 'Hero',
+    label: 'Início (Hero)',
     fields: [
-      { key: 'titulo', label: 'Título', type: 'text' },
-      { key: 'subtitulo', label: 'Subtítulo', type: 'text' },
-      { key: 'textoBotao', label: 'Texto do botão', type: 'text' },
-      { key: 'imagemFundo', label: 'Imagem de fundo', type: 'image' },
+      { key: 'badge', label: 'Texto do Badge (tag superior)', type: 'text' },
+      { key: 'titulo', label: 'Título Principal', type: 'textarea' },
+      { key: 'subtitulo', label: 'Subtítulo', type: 'textarea' },
+      { key: 'textoBotao1', label: 'Texto do Botão Primário', type: 'text' },
+      { key: 'textoBotao2', label: 'Texto do Botão Secundário', type: 'text' },
+      { key: 'imagemPrincipal', label: 'Imagem Principal', type: 'image' },
     ],
   },
-  sobre: {
-    label: 'Sobre',
+  rodape: {
+    label: 'Rodapé',
     fields: [
-      { key: 'titulo', label: 'Título', type: 'text' },
-      { key: 'texto', label: 'Texto', type: 'textarea' },
-      { key: 'imagem', label: 'Imagem', type: 'image' },
-    ],
-  },
-  servicos: {
-    label: 'Serviços',
-    fields: [
-      { key: 'titulo', label: 'Título', type: 'text' },
-      { key: 'descricao', label: 'Descrição', type: 'textarea' },
-      { key: 'icone', label: 'Ícone', type: 'icon' },
-    ],
-  },
-  contato: {
-    label: 'Contato',
-    fields: [
-      { key: 'email', label: 'E-mail', type: 'text' },
-      { key: 'telefone', label: 'Telefone', type: 'text' },
-      { key: 'endereco', label: 'Endereço', type: 'text' },
-      { key: 'iconeRedes', label: 'Ícone redes sociais', type: 'icon' },
-    ],
-  },
+      { key: 'textoDireitos', label: 'Texto de Direitos Autorais', type: 'text' },
+      { key: 'redesSociais', label: 'Ícone das Redes', type: 'icon' },
+    ]
+  }
 };

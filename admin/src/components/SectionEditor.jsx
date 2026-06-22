@@ -26,6 +26,12 @@ export function SectionEditor({ sectionKey, def, data, onChange, onToast }) {
           {f.type === 'icon' && (
             <IconPicker value={data[f.key] ?? ''} onChange={(v) => setField(f.key, v)} />
           )}
+          {f.type === 'color' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="color" value={data[f.key] ?? '#000000'} onChange={(e) => setField(f.key, e.target.value)} style={{ width: 40, height: 40, padding: 0, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
+              <input type="text" value={data[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={{ flex: 1 }} placeholder="#000000" />
+            </div>
+          )}
         </div>
       ))}
     </div>
