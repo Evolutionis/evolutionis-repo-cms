@@ -9,11 +9,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       url = url.includes('?') ? `${url}&connection_limit=3` : `${url}?connection_limit=3`;
     }
     
-    super({
+    super(url ? {
       datasources: {
         db: { url },
       },
-    });
+    } : undefined);
   }
 
   async onModuleInit() {
