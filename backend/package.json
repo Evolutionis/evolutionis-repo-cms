@@ -4,7 +4,7 @@
   "description": "Backend NestJS - CMS de conteudo com versionamento e deploy via GitHub Actions",
   "scripts": {
     "build": "nest build",
-    "start": "node dist/main",
+    "start": "npm run seed && node dist/main",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "prisma:generate": "prisma generate",
