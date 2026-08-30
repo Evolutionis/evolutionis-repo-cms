@@ -11,14 +11,21 @@ import * as path from 'path';
  *   GITHUB_TOKEN  - Personal Access Token (fine-grained) com permissão Contents: Read & Write
  *   GITHUB_OWNER  - dono do repo (seu usuário ou org), ex: "fernando"
  *   GITHUB_REPO   - nome do repo, ex: "projeto-agencianovaera"
- *   GITHUB_BRANCH - branch alvo (default: "main")
- *   CONTENT_PATH  - caminho do arquivo no repo (default: "content.json")
+ *   GITHUB_BRANCH_HOMOLOG - branch de homologação (default: "homolog")
+ *   GITHUB_BRANCH_PROD    - branch de produção   (default: "main")
+ *   GITHUB_BRANCH - compatibilidade: se definida, vira o branch de produção
+ *   CONTENT_PATH  - caminho do arquivo no repo (default: "public/content.json")
+ *
+ * Cada branch tem seu próprio workflow no repositório do site: homolog publica
+ * em public_html/preview/, main publica na raiz. Commitar no branch errado
+ * publica no site errado, então o branch é sempre parâmetro explícito.
  */
 @Injectable()
 export class GithubService {
   private readonly owner = process.env.GITHUB_OWNER!;
   private readonly repo = process.env.GITHUB_REPO!;
-  private readonly branch = process.env.GITHUB_BRANCH || 'main';
+  readonly branchProd = process.env.GITHUB_BRANCH_PROD || process.env.GITHUB_BRANCH || 'main';
+  readonly branchHomolog = process.env.GITHUB_BRANCH_HOMOLOG || 'homolog';
   private readonly path = process.env.CONTENT_PATH || 'public/content.json';
   private readonly token = process.env.GITHUB_TOKEN!;
   private readonly api = 'https://api.github.com';
@@ -33,10 +40,10 @@ export class GithubService {
   }
 
   /** Busca o SHA atual do arquivo (necessário para atualizar um arquivo existente). */
-  private async getCurrentSha(): Promise<string | undefined> {
+  private async getCurrentSha(branch: string): Promise<string | undefined> {
     const url = `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(
       this.path,
-    )}?ref=${this.branch}`;
+    )}?ref=${branch}`;
     const res = await fetch(url, { headers: this.headers() });
     if (res.status === 404) return undefined; // arquivo ainda não existe
     if (!res.ok) {
@@ -52,7 +59,11 @@ export class GithubService {
    * Cria/atualiza o content.json com o conteúdo dado.
    * Retorna o SHA do commit gerado (para registrar no banco como deploySha).
    */
-  async commitContent(content: unknown, message: string): Promise<string> {
+  async commitContent(
+    content: unknown,
+    message: string,
+    branch: string,
+  ): Promise<string> {
     const localSitePath = process.env.LOCAL_SITE_PATH;
     if (localSitePath) {
       const fullPath = path.join(localSitePath, this.path);
@@ -61,7 +72,7 @@ export class GithubService {
       return `local-sha-${Date.now()}`;
     }
 
-    const sha = await this.getCurrentSha();
+    const sha = await this.getCurrentSha(branch);
     const url = `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(
       this.path,
     )}`;
@@ -69,7 +80,7 @@ export class GithubService {
     const body = {
       message,
       content: Buffer.from(JSON.stringify(content, null, 2)).toString('base64'),
-      branch: this.branch,
+      branch,
       ...(sha ? { sha } : {}),
     };
 
@@ -96,6 +107,13 @@ export class GithubService {
    *
    * IMAGE_DIR  - pasta no repo onde as imagens vão (default: "public/images")
    * IMAGE_PUBLIC_PREFIX - prefixo da URL pública no site (default: "/images")
+   */
+  /**
+   * A imagem vai para os DOIS branches, sempre.
+   * Se ficasse só em homologação, promover o content.json para produção levaria
+   * junto a URL de uma imagem que não existe lá — e o site de produção
+   * mostraria um espaço vazio, sem erro nenhum aparecer.
+   * Imagem é arquivo novo com nome único: subir nos dois não gera conflito.
    */
   async commitImage(
     fileName: string,
@@ -125,23 +143,23 @@ export class GithubService {
       repoPath,
     )}`;
 
-    // Imagem é arquivo novo: não precisa de sha anterior.
-    const body = {
-      message,
-      content: base64Content, // já em base64, sem o prefixo data:
-      branch: this.branch,
-    };
+    for (const branch of [this.branchHomolog, this.branchProd]) {
+      // Imagem é arquivo novo: não precisa de sha anterior.
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: this.headers(),
+        body: JSON.stringify({
+          message,
+          content: base64Content, // já em base64, sem o prefixo data:
+          branch,
+        }),
+      });
 
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: this.headers(),
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      throw new InternalServerErrorException(
-        `GitHub upload de imagem falhou: ${res.status} ${await res.text()}`,
-      );
+      if (!res.ok) {
+        throw new InternalServerErrorException(
+          `GitHub upload de imagem falhou no branch ${branch}: ${res.status} ${await res.text()}`,
+        );
+      }
     }
 
     return { path: repoPath, publicUrl: `${publicPrefix}/${finalName}` };
@@ -163,7 +181,7 @@ export class GithubService {
     }
     const url = `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(
       dir,
-    )}?ref=${this.branch}`;
+    )}?ref=${this.branchHomolog}`;
 
     const res = await fetch(url, { headers: this.headers() });
     if (res.status === 404) return []; // pasta ainda não existe

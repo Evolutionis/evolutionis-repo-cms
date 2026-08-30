@@ -1,9 +1,23 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { GithubService } from '../github/github.service';
 
 type ContentMap = Record<string, unknown>; // { hero: {...}, sobre: {...}, ... }
+
+/**
+ * Dois ambientes:
+ *
+ *   homolog -> branch de homologação -> public_html/preview/  (o /preview do site)
+ *   prod    -> branch de produção    -> public_html/          (o site que o cliente vê)
+ *
+ * Publicar mexe SÓ em homologação. Produção só muda por promoção explícita,
+ * que republica o conteúdo já conferido no preview. É essa separação que
+ * permite errar no preview sem o cliente ver.
+ */
+export type Ambiente = 'homolog' | 'prod';
+
+const AMBIENTES: Ambiente[] = ['homolog', 'prod'];
 
 @Injectable()
 export class ContentService {
@@ -12,37 +26,126 @@ export class ContentService {
     private github: GithubService,
   ) {}
 
-  /** Retorna o conteúdo da versão atual (ou objeto vazio se ainda não há nenhuma). */
-  async getCurrent(): Promise<{ content: ContentMap; versionNum: number | null }> {
-    const current = await this.prisma.contentVersion.findFirst({
-      where: { isCurrent: true },
+  private valida(ambiente: string | undefined): Ambiente {
+    const a = (ambiente || 'homolog') as Ambiente;
+    if (!AMBIENTES.includes(a)) {
+      throw new BadRequestException(`Ambiente inválido: ${ambiente}. Use homolog ou prod.`);
+    }
+    return a;
+  }
+
+  private versaoAtual(ambiente: Ambiente) {
+    const where =
+      ambiente === 'prod' ? { isCurrentProd: true } : { isCurrentHomolog: true };
+    return this.prisma.contentVersion.findFirst({
+      where,
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Conteúdo do ambiente pedido (homologação por padrão — é o que o painel edita).
+   * Objeto vazio se aquele ambiente ainda não recebeu nada.
+   */
+  async getCurrent(
+    ambiente?: string,
+  ): Promise<{ content: ContentMap; versionNum: number | null; ambiente: Ambiente }> {
+    const amb = this.valida(ambiente);
+    const atual = await this.versaoAtual(amb);
     return {
-      content: (current?.content as ContentMap) ?? {},
-      versionNum: current?.versionNum ?? null,
+      content: (atual?.content as ContentMap) ?? {},
+      versionNum: atual?.versionNum ?? null,
+      ambiente: amb,
     };
   }
 
   /**
-   * Publica uma alteração. Recebe APENAS as seções alteradas (patch parcial),
-   * mescla com o conteúdo atual, grava uma nova versão e commita no GitHub.
-   * Ex: body = { sections: { hero: { titulo: "Novo" } }, comment: "ajuste hero" }
+   * Situação dos dois ambientes de uma vez — é o que o painel mostra antes de
+   * deixar promover. `sincronizado` responde à única pergunta que importa:
+   * o que está no ar em produção é o mesmo que foi conferido no preview?
    */
-  async publish(
-    sections: ContentMap,
-    comment: string | undefined,
-    authorId: string,
-  ) {
-    const { content: currentContent } = await this.getCurrent();
+  async status() {
+    const [homolog, prod] = await Promise.all([
+      this.versaoAtual('homolog'),
+      this.versaoAtual('prod'),
+    ]);
 
-    // Merge raso por seção: substitui as seções enviadas, mantém o resto.
-    const merged: ContentMap = { ...currentContent, ...sections };
-
-    return this.commitNewVersion(merged, comment ?? 'Publicação via admin', authorId);
+    return {
+      homolog: homolog && {
+        id: homolog.id,
+        versionNum: homolog.versionNum,
+        comment: homolog.comment,
+        createdAt: homolog.createdAt,
+      },
+      prod: prod && {
+        id: prod.id,
+        versionNum: prod.versionNum,
+        comment: prod.comment,
+        createdAt: prod.createdAt,
+        promotedAt: prod.promotedAt,
+      },
+      sincronizado: !!homolog && homolog.id === prod?.id,
+      branches: { homolog: this.github.branchHomolog, prod: this.github.branchProd },
+    };
   }
 
-  /** Lista o histórico de versões (sem o conteúdo pesado, só metadados). */
+  /**
+   * Publica em HOMOLOGAÇÃO. Recebe as seções alteradas, mescla com o que já
+   * está em homologação, grava uma nova versão e commita no branch de preview.
+   * Produção não é tocada.
+   */
+  async publish(sections: ContentMap, comment: string | undefined, authorId: string) {
+    const { content: atual } = await this.getCurrent('homolog');
+    const mesclado: ContentMap = { ...atual, ...sections };
+    return this.novaVersaoHomolog(mesclado, comment ?? 'Publicação via painel', authorId);
+  }
+
+  /**
+   * Promove para PRODUÇÃO o conteúdo que está em homologação (ou o de uma
+   * versão específica, para poder voltar a algo antigo sem passar de novo pelo
+   * preview). Não cria versão nova: marca a MESMA versão como no ar em produção,
+   * porque é literalmente o mesmo conteúdo — criar outra só duplicaria o
+   * histórico sem nada ter mudado.
+   */
+  async promote(versionId?: string) {
+    const alvo = versionId
+      ? await this.prisma.contentVersion.findUnique({ where: { id: versionId } })
+      : await this.versaoAtual('homolog');
+
+    if (!alvo) {
+      throw new NotFoundException(
+        versionId ? 'Versão não encontrada' : 'Nada publicado em homologação para promover',
+      );
+    }
+
+    const atualProd = await this.versaoAtual('prod');
+    if (atualProd?.id === alvo.id) {
+      throw new BadRequestException(`A v${alvo.versionNum} já está no ar em produção.`);
+    }
+
+    const sha = await this.github.commitContent(
+      alvo.content,
+      `Promove v${alvo.versionNum} para producao${alvo.comment ? `: ${alvo.comment}` : ''}`,
+      this.github.branchProd,
+    );
+
+    // Desmarcar antes de marcar: o índice único parcial da migração recusa duas
+    // versões marcadas ao mesmo tempo, então a ordem aqui não é decorativa.
+    const [, promovida] = await this.prisma.$transaction([
+      this.prisma.contentVersion.updateMany({
+        where: { isCurrentProd: true },
+        data: { isCurrentProd: false },
+      }),
+      this.prisma.contentVersion.update({
+        where: { id: alvo.id },
+        data: { isCurrentProd: true, deployShaProd: sha, promotedAt: new Date() },
+      }),
+    ]);
+
+    return promovida;
+  }
+
+  /** Histórico (sem o conteúdo pesado, só metadados). */
   async listVersions() {
     return this.prisma.contentVersion.findMany({
       orderBy: { versionNum: 'desc' },
@@ -50,15 +153,18 @@ export class ContentService {
         id: true,
         versionNum: true,
         comment: true,
-        isCurrent: true,
+        isCurrentHomolog: true,
+        isCurrentProd: true,
         deploySha: true,
+        deployShaProd: true,
+        promotedAt: true,
         createdAt: true,
         author: { select: { username: true } },
       },
     });
   }
 
-  /** Retorna o conteúdo completo de uma versão específica (para preview). */
+  /** Conteúdo completo de uma versão específica. */
   async getVersion(id: string) {
     const v = await this.prisma.contentVersion.findUnique({ where: { id } });
     if (!v) throw new NotFoundException('Versão não encontrada');
@@ -66,48 +172,50 @@ export class ContentService {
   }
 
   /**
-   * Rollback: promove o conteúdo de uma versão antiga como NOVA versão atual.
-   * Nada é apagado — o histórico permanece linear e o rollback fica registrado.
+   * Rollback dentro de um ambiente. Em homologação grava uma versão nova com o
+   * conteúdo antigo (o histórico continua linear). Em produção é uma promoção
+   * da versão antiga — sem versão nova, pelo mesmo motivo do promote().
    */
-  async rollback(versionId: string, authorId: string) {
-    const target = await this.prisma.contentVersion.findUnique({
-      where: { id: versionId },
-    });
-    if (!target) throw new NotFoundException('Versão não encontrada');
+  async rollback(versionId: string, authorId: string, ambiente?: string) {
+    const amb = this.valida(ambiente);
+    if (amb === 'prod') return this.promote(versionId);
 
-    return this.commitNewVersion(
-      target.content as ContentMap,
-      `Rollback para v${target.versionNum}`,
+    const alvo = await this.prisma.contentVersion.findUnique({ where: { id: versionId } });
+    if (!alvo) throw new NotFoundException('Versão não encontrada');
+
+    return this.novaVersaoHomolog(
+      alvo.content as ContentMap,
+      `Rollback para v${alvo.versionNum}`,
       authorId,
     );
   }
 
-  /** Núcleo: grava nova versão no banco, commita no GitHub, marca como atual. */
-  private async commitNewVersion(
-    content: ContentMap,
-    message: string,
-    authorId: string,
-  ) {
-    // 1. Commita no GitHub -> dispara o Actions -> deploy FTP Locaweb
-    const deploySha = await this.github.commitContent(content, message);
+  /** Grava nova versão, commita no branch de homologação e marca como atual lá. */
+  private async novaVersaoHomolog(content: ContentMap, message: string, authorId: string) {
+    // 1. Commit no branch de preview -> Actions -> FTP em public_html/preview/
+    const deploySha = await this.github.commitContent(
+      content,
+      message,
+      this.github.branchHomolog,
+    );
 
-    // 2. Transação: desmarca a atual e cria a nova como atual
-    const [, novaVersao] = await this.prisma.$transaction([
+    // 2. Desmarca a anterior e cria a nova, na mesma transação
+    const [, nova] = await this.prisma.$transaction([
       this.prisma.contentVersion.updateMany({
-        where: { isCurrent: true },
-        data: { isCurrent: false },
+        where: { isCurrentHomolog: true },
+        data: { isCurrentHomolog: false },
       }),
       this.prisma.contentVersion.create({
         data: {
           content: content as Prisma.InputJsonValue,
           comment: message,
-          isCurrent: true,
+          isCurrentHomolog: true,
           deploySha,
           authorId,
         },
       }),
     ]);
 
-    return novaVersao;
+    return nova;
   }
 }
