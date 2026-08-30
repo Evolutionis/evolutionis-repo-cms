@@ -14,7 +14,7 @@ export const CONTEUDO_PADRAO = {
     corPrimaria: "#1E4E79",
     corSecundaria: "#DDEAF6",
     logo: "/logo.png",
-    logoRodape: "/logo-rodape.png"
+    logoRodape: "/logo-claro.png"
   },
   cabecalho: {
     menu1: "A operação",
