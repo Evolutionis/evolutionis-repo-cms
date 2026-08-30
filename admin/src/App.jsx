@@ -2,15 +2,17 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   PencilLine, History, LogOut, Clock, GitCommit, ExternalLink,
   RotateCcw, ChevronsDownUp, ChevronsUpDown, Layers, CheckCircle2, PanelLeftClose,
+  Rocket, Eye, Globe, AlertTriangle,
 } from 'lucide-react';
 import { api, getToken, getUser } from './lib/api';
 import { SECTION_SCHEMA } from './lib/schema';
 import { CONTEUDO_PADRAO } from './lib/conteudoPadrao';
 import { SectionEditor } from './components/SectionEditor';
 
-// Onde o site está publicado. Vira link no painel para conferir o resultado
-// sem sair para o navegador procurar o endereço.
-const URL_SITE = import.meta.env.VITE_SITE_URL || 'https://evolutionis.com.br/preview/';
+// Os dois endereços do site. Homologação é onde se confere; produção é o que o
+// cliente vê. Viram link no painel para não ter que procurar o endereço fora.
+const URL_HOMOLOG = import.meta.env.VITE_SITE_URL || 'https://evolutionis.com.br/preview/';
+const URL_PROD = import.meta.env.VITE_SITE_PROD_URL || 'https://evolutionis.com.br/';
 
 // Seções que nunca foram publicadas voltam vazias da API. Em vez de mostrar
 // caixas em branco — que o operador não tem como distinguir de "o site está
@@ -117,8 +119,10 @@ function Dashboard({ onLogout, toast, showToast }) {
   const [tab, setTab] = useState('edit');
   const [content, setContent] = useState({});
   const [versoes, setVersoes] = useState(null);
+  const [estado, setEstado] = useState(null); // situação dos dois ambientes
   const [comment, setComment] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [lateral, setLateral] = useState(true);
   // Seções longas começam fechadas: com todas abertas a página vira uma
   // rolagem de vários metros e achar um campo custa mais que editar.
@@ -143,24 +147,59 @@ function Dashboard({ onLogout, toast, showToast }) {
     }
   }, []);
 
+  const loadEstado = useCallback(async () => {
+    try {
+      setEstado(await api.status());
+    } catch {
+      setEstado(null); // idem: um erro só, no carregamento do conteúdo
+    }
+  }, []);
+
   useEffect(() => {
     loadCurrent();
     loadVersoes();
-  }, [loadCurrent, loadVersoes]);
+    loadEstado();
+  }, [loadCurrent, loadVersoes, loadEstado]);
 
+  // Publicar mexe SÓ em homologação. É de propósito: dá para errar no preview
+  // sem o cliente ver. Para o site do cliente mudar, é preciso promover.
   async function publish() {
     setPublishing(true);
     try {
       await api.publish(content, comment.trim() || undefined);
       setComment('');
-      showToast('Publicado. O deploy foi disparado no GitHub.');
-      await loadCurrent();
-      await loadVersoes();
+      showToast('Publicado em homologação. Confira no /preview/ antes de promover.');
+      await recarrega();
     } catch (e) {
       showToast(e.message, 'err');
     } finally {
       setPublishing(false);
     }
+  }
+
+  // Leva para o site do cliente o que já está no preview. Sem versão nova: é o
+  // mesmo conteúdo, só passa a valer também em produção.
+  async function promote() {
+    const v = atualHomolog ? `v${atualHomolog.versionNum}` : 'o que está em homologação';
+    if (!confirm(
+      `Publicar ${v} no site do cliente?\n\n` +
+      'O que está em produção hoje será substituído. Confira antes no /preview/.',
+    )) return;
+
+    setPromoting(true);
+    try {
+      await api.promote();
+      showToast('Promovido. O site do cliente vai atualizar em alguns minutos.');
+      await recarrega();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  async function recarrega() {
+    await Promise.all([loadCurrent(), loadVersoes(), loadEstado()]);
   }
 
   function logout() {
@@ -173,7 +212,11 @@ function Dashboard({ onLogout, toast, showToast }) {
   }
 
   const usuario = getUser() || '—';
-  const atual = useMemo(() => versoes?.find((v) => v.isCurrent) || versoes?.[0], [versoes]);
+  // Cada ambiente tem a sua marca; vêm da lista porque só ela traz o autor.
+  const atualHomolog = useMemo(() => versoes?.find((v) => v.isCurrentHomolog), [versoes]);
+  const atualProd = useMemo(() => versoes?.find((v) => v.isCurrentProd), [versoes]);
+  // Nada novo para promover quando os dois apontam para a mesma versão.
+  const sincronizado = !!atualHomolog && atualHomolog.id === atualProd?.id;
 
   return (
     <div className={`app ${lateral ? '' : 'sem-lateral'}`}>
@@ -200,8 +243,11 @@ function Dashboard({ onLogout, toast, showToast }) {
           })}
 
           <p className="side-grupo">Site</p>
-          <a className="side-item" href={URL_SITE} target="_blank" rel="noreferrer">
-            <ExternalLink size={16} /> Abrir o site
+          <a className="side-item" href={URL_HOMOLOG} target="_blank" rel="noreferrer">
+            <Eye size={16} /> Homologação
+          </a>
+          <a className="side-item" href={URL_PROD} target="_blank" rel="noreferrer">
+            <Globe size={16} /> Site do cliente
           </a>
         </nav>
 
@@ -230,8 +276,8 @@ function Dashboard({ onLogout, toast, showToast }) {
             <span className="chip">Site institucional</span>
           </div>
           <div className="topo-acoes">
-            <a className="btn-ghost btn-sm" href={URL_SITE} target="_blank" rel="noreferrer">
-              <ExternalLink size={14} /> Ver o site
+            <a className="btn-ghost btn-sm" href={URL_HOMOLOG} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} /> Ver a homologação
             </a>
           </div>
         </header>
@@ -239,7 +285,7 @@ function Dashboard({ onLogout, toast, showToast }) {
         {tab === 'edit' && (
           <div className="barra">
             <span className="pill"><Layers size={13} /> {CHAVES.length} seções</span>
-            <span className="pill"><Clock size={13} /> publicado {quando(atual?.createdAt)}</span>
+            <span className="pill"><Clock size={13} /> preview {quando(atualHomolog?.createdAt)}</span>
             <div className="barra-dir">
               <button className="pill" onClick={() => setAbertas(CHAVES)}>
                 <ChevronsUpDown size={13} /> Abrir todas
@@ -255,7 +301,12 @@ function Dashboard({ onLogout, toast, showToast }) {
           <div className="col-principal">
             {tab === 'edit' && (
               <>
-                <Metricas versoes={versoes} atual={atual} />
+                <Metricas
+                  versoes={versoes}
+                  atualHomolog={atualHomolog}
+                  atualProd={atualProd}
+                  sincronizado={sincronizado}
+                />
                 {Object.entries(SECTION_SCHEMA).map(([key, def]) => (
                   <SectionEditor
                     key={key}
@@ -272,18 +323,20 @@ function Dashboard({ onLogout, toast, showToast }) {
             )}
 
             {tab === 'versions' && (
-              <Versions
-                versoes={versoes}
-                showToast={showToast}
-                onChanged={async () => {
-                  await loadVersoes();
-                  await loadCurrent();
-                }}
-              />
+              <Versions versoes={versoes} showToast={showToast} onChanged={recarrega} />
             )}
           </div>
 
-          {tab === 'edit' && <Rail versoes={versoes} atual={atual} onVerTudo={() => setTab('versions')} />}
+          {tab === 'edit' && (
+            <Rail
+              versoes={versoes}
+              estado={estado}
+              atualHomolog={atualHomolog}
+              atualProd={atualProd}
+              sincronizado={sincronizado}
+              onVerTudo={() => setTab('versions')}
+            />
+          )}
         </div>
 
         {tab === 'edit' && (
@@ -294,9 +347,29 @@ function Dashboard({ onLogout, toast, showToast }) {
               onChange={(e) => setComment(e.target.value)}
             />
             <button className="btn-primary" onClick={publish} disabled={publishing}>
-              {publishing ? <span className="spinner" /> : 'Publicar'}
+              {publishing ? <span className="spinner" /> : <><Eye size={14} /> Publicar em homologação</>}
             </button>
-            <span className="aviso">Publicar grava uma nova versão e dispara o deploy do site.</span>
+            <button
+              className="btn-promover"
+              onClick={promote}
+              disabled={promoting || !atualHomolog || sincronizado}
+              title={
+                !atualHomolog
+                  ? 'Publique em homologação antes de promover'
+                  : sincronizado
+                    ? 'O site do cliente já está com a versão do preview'
+                    : 'Levar o que está no preview para o site do cliente'
+              }
+            >
+              {promoting ? <span className="spinner" /> : <><Rocket size={14} /> Promover para produção</>}
+            </button>
+            <span className="aviso">
+              {sincronizado
+                ? 'Preview e site do cliente estão iguais.'
+                : atualHomolog
+                  ? `v${atualHomolog.versionNum} está no preview, aguardando promoção.`
+                  : 'Publicar grava uma versão nova e atualiza só o /preview/.'}
+            </span>
           </div>
         )}
       </div>
@@ -304,62 +377,106 @@ function Dashboard({ onLogout, toast, showToast }) {
   );
 }
 
-function Metricas({ versoes, atual }) {
+function Metricas({ versoes, atualHomolog, atualProd, sincronizado }) {
   if (!versoes) return null;
 
   return (
     <div className="metricas">
       <div className="metrica">
-        <div className="rot"><GitCommit size={13} /> Versão no ar</div>
+        <div className="rot"><Eye size={13} /> No preview</div>
         <div className="linha">
-          <span className="val">{atual ? `v${atual.versionNum}` : '—'}</span>
-          {atual && <span className="delta ok"><CheckCircle2 size={12} /> publicada</span>}
+          <span className="val">{atualHomolog ? `v${atualHomolog.versionNum}` : '—'}</span>
+          {atualHomolog && !sincronizado && (
+            <span className="delta aguardando"><Clock size={12} /> a promover</span>
+          )}
+        </div>
+        <div className="sub">{atualHomolog ? quando(atualHomolog.createdAt) : 'nada publicado ainda'}</div>
+      </div>
+
+      <div className="metrica">
+        <div className="rot"><Globe size={13} /> No site do cliente</div>
+        <div className="linha">
+          <span className="val">{atualProd ? `v${atualProd.versionNum}` : '—'}</span>
+          {atualProd && sincronizado && (
+            <span className="delta ok"><CheckCircle2 size={12} /> em dia</span>
+          )}
         </div>
         <div className="sub">
-          {versoes.length} {versoes.length === 1 ? 'publicação' : 'publicações'} no histórico
+          {atualProd ? quando(atualProd.promotedAt || atualProd.createdAt) : 'nunca promovido'}
         </div>
       </div>
 
       <div className="metrica">
-        <div className="rot"><Clock size={13} /> Última publicação</div>
-        <div className="linha"><span className="val">{quando(atual?.createdAt)}</span></div>
-        <div className="sub">{atual ? new Date(atual.createdAt).toLocaleString('pt-BR') : 'nada publicado ainda'}</div>
-      </div>
-
-      <div className="metrica">
-        <div className="rot">Publicado por</div>
+        <div className="rot"><GitCommit size={13} /> Última publicação</div>
         <div className="linha">
-          <span className="avatar peq">{iniciais(atual?.author?.username)}</span>
-          <span className="val val-txt">{atual?.author?.username || '—'}</span>
+          <span className="avatar peq">{iniciais(atualHomolog?.author?.username)}</span>
+          <span className="val val-txt">{atualHomolog?.author?.username || '—'}</span>
         </div>
-        <div className="sub">{atual?.comment || 'sem descrição'}</div>
+        <div className="sub">{atualHomolog?.comment || 'sem descrição'}</div>
       </div>
 
       <div className="metrica">
         <div className="rot"><Layers size={13} /> Seções</div>
         <div className="linha"><span className="val">{CHAVES.length}</span></div>
-        <div className="sub">todas editáveis por aqui</div>
+        <div className="sub">{versoes.length} no histórico</div>
       </div>
     </div>
   );
 }
 
-function Rail({ versoes, atual, onVerTudo }) {
+function Rail({ versoes, estado, atualHomolog, atualProd, sincronizado, onVerTudo }) {
   return (
     <aside className="rail">
       <div className="rail-card">
         <div className="rail-cab">
-          <h4>Situação do site</h4>
+          <h4>Os dois ambientes</h4>
         </div>
         <div className="rail-corpo">
           <div className="ambiente">
-            <span className="ponto ok" />
+            <span className={`ponto ${atualHomolog ? 'ok' : ''}`} />
             <div>
-              <b>No ar</b>
-              <span className="hint">{atual ? `v${atual.versionNum} · ${quando(atual.createdAt)}` : 'nada publicado'}</span>
+              <b>Homologação</b>
+              <span className="hint">
+                {atualHomolog
+                  ? `v${atualHomolog.versionNum} · ${quando(atualHomolog.createdAt)}`
+                  : 'nada publicado'}
+              </span>
             </div>
-            <a className="link" href={URL_SITE} target="_blank" rel="noreferrer">abrir</a>
+            <a className="link" href={URL_HOMOLOG} target="_blank" rel="noreferrer">abrir</a>
           </div>
+
+          <div className="ambiente">
+            <span className={`ponto ${atualProd ? 'ok' : ''}`} />
+            <div>
+              <b>Site do cliente</b>
+              <span className="hint">
+                {atualProd
+                  ? `v${atualProd.versionNum} · ${quando(atualProd.promotedAt || atualProd.createdAt)}`
+                  : 'nunca promovido'}
+              </span>
+            </div>
+            <a className="link" href={URL_PROD} target="_blank" rel="noreferrer">abrir</a>
+          </div>
+
+          {/* A única pergunta que importa antes de promover: o cliente está
+              vendo o que foi conferido no preview, ou está atrás? */}
+          {atualHomolog && !sincronizado && (
+            <p className="nota-ambiente">
+              <AlertTriangle size={13} />
+              O site do cliente está na v{atualProd ? atualProd.versionNum : '—'}. A v
+              {atualHomolog.versionNum} está no preview esperando promoção.
+            </p>
+          )}
+          {sincronizado && (
+            <p className="nota-ambiente ok">
+              <CheckCircle2 size={13} /> Os dois estão na mesma versão.
+            </p>
+          )}
+          {estado?.branches && (
+            <p className="hint branches">
+              branches: {estado.branches.homolog} → preview · {estado.branches.prod} → raiz
+            </p>
+          )}
         </div>
       </div>
 
@@ -393,12 +510,36 @@ function Rail({ versoes, atual, onVerTudo }) {
 function Versions({ versoes, showToast, onChanged }) {
   const [busyId, setBusyId] = useState(null);
 
-  async function rollback(v) {
-    if (!confirm(`Restaurar a versão v${v.versionNum}? Isso cria uma nova versão com esse conteúdo e republica o site.`)) return;
+  // Restaurar em homologação grava uma versão nova com o conteúdo antigo — o
+  // histórico continua linear e o site do cliente não muda.
+  async function restaurar(v) {
+    if (!confirm(
+      `Restaurar a v${v.versionNum} no preview?\n\n` +
+      'Isso grava uma versão nova com esse conteúdo. O site do cliente não muda.',
+    )) return;
     setBusyId(v.id);
     try {
-      await api.rollback(v.id);
-      showToast(`Restaurada a v${v.versionNum}. Deploy disparado.`);
+      await api.rollback(v.id, 'homolog');
+      showToast(`v${v.versionNum} restaurada no preview.`);
+      await onChanged();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Promover uma versão antiga é como se volta atrás em produção sem passar de
+  // novo pelo preview. Não cria versão nova: é o mesmo conteúdo.
+  async function promover(v) {
+    if (!confirm(
+      `Publicar a v${v.versionNum} no site do cliente?\n\n` +
+      'O que está em produção hoje será substituído.',
+    )) return;
+    setBusyId(v.id);
+    try {
+      await api.promote(v.id);
+      showToast(`v${v.versionNum} promovida para produção.`);
       await onChanged();
     } catch (e) {
       showToast(e.message, 'err');
@@ -421,7 +562,11 @@ function Versions({ versoes, showToast, onChanged }) {
       </div>
       {versoes.map((v) => (
         <div className="tabela-linha" key={v.id}>
-          <span className="vnum">v{v.versionNum}{v.isCurrent && <span className="badge">no ar</span>}</span>
+          <span className="vnum">
+            v{v.versionNum}
+            {v.isCurrentHomolog && <span className="badge">preview</span>}
+            {v.isCurrentProd && <span className="badge prod">no ar</span>}
+          </span>
           <span className="desc">{v.comment || 'sem descrição'}</span>
           <span className="autor">
             <span className="avatar peq">{iniciais(v.author?.username)}</span>
@@ -429,14 +574,21 @@ function Versions({ versoes, showToast, onChanged }) {
           </span>
           <span className="hint">{new Date(v.createdAt).toLocaleString('pt-BR')}</span>
           <span className="acao">
-            {!v.isCurrent && (
-              <button className="btn-ghost btn-sm" onClick={() => rollback(v)} disabled={busyId === v.id}>
-                {busyId === v.id ? (
-                  <span className="spinner escuro" />
-                ) : (
-                  <><RotateCcw size={13} /> Restaurar</>
+            {busyId === v.id ? (
+              <span className="spinner escuro" />
+            ) : (
+              <>
+                {!v.isCurrentHomolog && (
+                  <button className="btn-ghost btn-sm" onClick={() => restaurar(v)}>
+                    <RotateCcw size={13} /> Restaurar no preview
+                  </button>
                 )}
-              </button>
+                {!v.isCurrentProd && (
+                  <button className="btn-ghost btn-sm" onClick={() => promover(v)}>
+                    <Rocket size={13} /> Pôr no ar
+                  </button>
+                )}
+              </>
             )}
           </span>
         </div>

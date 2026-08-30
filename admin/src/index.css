@@ -27,6 +27,11 @@
   --ok-linha: #abefc6;
   --erro: #b42318;
   --erro-fundo: #fef3f2;
+  /* Terceiro estado: publicado no preview, ainda não no ar para o cliente.
+     Âmbar porque não é nem "tudo certo" nem "deu problema" — é "falta um passo". */
+  --espera: #b54708;
+  --espera-fundo: #fffaeb;
+  --espera-linha: #fedf89;
 
   --raio: 12px;
   --lateral: 236px;
@@ -147,6 +152,17 @@ button.pill:hover { background: var(--hover); }
 .ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); flex-shrink: 0; }
 .ponto.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-fundo); }
 
+/* Aviso de que o cliente está atrás do preview. Fica no rail, junto dos dois
+   ambientes, porque é ali que a pergunta "posso promover?" aparece. */
+.nota-ambiente {
+  display: flex; align-items: flex-start; gap: 6px; margin-top: 10px;
+  font-size: 12px; line-height: 1.4; border-radius: 8px; padding: 8px 10px;
+  color: var(--espera); background: var(--espera-fundo); border: 1px solid var(--espera-linha);
+}
+.nota-ambiente.ok { color: var(--ok); background: var(--ok-fundo); border-color: var(--ok-linha); }
+.nota-ambiente svg { flex-shrink: 0; margin-top: 1px; }
+.branches { margin-top: 8px; font-size: 11px; color: var(--muted-2); }
+
 .atividade { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .atividade:last-child { border-bottom: none; padding-bottom: 0; }
 .atividade:first-child { padding-top: 0; }
@@ -177,6 +193,7 @@ button.pill:hover { background: var(--hover); }
   border-radius: 20px; padding: 2px 8px;
 }
 .delta.ok { color: var(--ok); background: var(--ok-fundo); border: 1px solid var(--ok-linha); }
+.delta.aguardando { color: var(--espera); background: var(--espera-fundo); border: 1px solid var(--espera-linha); }
 
 /* ---------------- seções ---------------- */
 
@@ -223,6 +240,15 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary:hover:not(:disabled) { background: var(--brand-forte); }
 .btn-ghost { background: var(--card); border: 1px solid var(--line-forte); color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
 .btn-ghost:hover:not(:disabled) { background: var(--hover); }
+/* Publicar é o botão de todo dia (preenchido); promover é o raro e caro, então
+   vem contornado — parecido o bastante para ser irmão, diferente o bastante
+   para não ser clicado por engano. */
+.btn-promover {
+  background: var(--card); border: 1.5px solid var(--brand); color: var(--brand);
+  font-weight: 600; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-promover:hover:not(:disabled) { background: var(--tint-2); }
+.btn-promover:disabled { border-color: var(--line-forte); color: var(--muted-2); }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .btn-primary svg { vertical-align: -2px; margin-right: 5px; }
 .link { color: var(--brand); cursor: pointer; background: none; border: none; font-size: 13px; font-weight: 500; padding: 0; font-family: inherit; }
@@ -294,7 +320,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 
 .tabela { background: var(--card); border: 1px solid var(--line); border-radius: var(--raio); box-shadow: var(--sombra); overflow: hidden; }
 .tabela-cab, .tabela-linha {
-  display: grid; grid-template-columns: 110px minmax(0,1fr) 140px 160px 120px;
+  display: grid; grid-template-columns: 130px minmax(0,1fr) 130px 150px 250px;
   gap: 14px; align-items: center; padding: 12px 18px;
 }
 .tabela-cab { background: var(--paper); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
@@ -303,11 +329,14 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .tabela .vnum { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
 .tabela .desc { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 .tabela .autor { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
-.tabela .acao { text-align: right; }
+.tabela .acao { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .badge {
   font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 20px;
-  background: var(--ok-fundo); color: var(--ok); border: 1px solid var(--ok-linha); font-family: Inter, sans-serif;
+  background: var(--tint); color: var(--brand); border: 1px solid var(--tint);
+  font-family: Inter, sans-serif;
 }
+/* Verde só no que está no ar para o cliente — é o estado que importa conferir. */
+.badge.prod { background: var(--ok-fundo); color: var(--ok); border-color: var(--ok-linha); }
 
 /* ---------------- login ---------------- */
 
@@ -404,7 +433,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .metrica:nth-child(3) { border-left: none; }
   .metrica:nth-child(n+3) { border-top: 1px solid var(--line); }
   .barra, .colunas { padding-left: 14px; padding-right: 14px; }
-  .publish-bar { left: 0; padding: 12px 14px; }
+  .publish-bar { left: 0; padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
+  .publish-bar input { max-width: none; flex-basis: 100%; }
+  .publish-bar .btn-primary, .publish-bar .btn-promover { flex: 1; justify-content: center; }
   .publish-bar .aviso { display: none; }
   .tabela-cab { display: none; }
   .tabela-linha { grid-template-columns: 1fr auto; gap: 6px 12px; }

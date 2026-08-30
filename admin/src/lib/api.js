@@ -48,15 +48,30 @@ export const api = {
   logout() {
     setToken(null);
   },
-  getCurrent: () => request('/content/current'),
+  // Sem ambiente vem homologação — é o que o painel edita.
+  getCurrent: (ambiente = 'homolog') =>
+    request('/content/current?ambiente=' + encodeURIComponent(ambiente)),
+  // Situação dos dois ambientes de uma vez, para os cartões e o botão de promover.
+  status: () => request('/content/status'),
   listVersions: () => request('/content/versions'),
+  // Publicar mexe só em homologação (o /preview/).
   publish: (sections, comment) =>
     request('/content/publish', {
       method: 'POST',
       body: JSON.stringify({ sections, comment }),
     }),
-  rollback: (versionId) =>
-    request('/content/rollback/' + versionId, { method: 'POST' }),
+  // Promover leva para produção o que já está em homologação. Com versionId,
+  // promove aquela versão — é assim que se volta produção para algo antigo.
+  promote: (versionId) =>
+    request('/content/promote', {
+      method: 'POST',
+      body: JSON.stringify(versionId ? { versionId } : {}),
+    }),
+  rollback: (versionId, ambiente = 'homolog') =>
+    request(
+      '/content/rollback/' + versionId + '?ambiente=' + encodeURIComponent(ambiente),
+      { method: 'POST' },
+    ),
   listImages: () => request('/images'),
   uploadImage: (fileName, base64, comment) =>
     request('/images/upload', {
