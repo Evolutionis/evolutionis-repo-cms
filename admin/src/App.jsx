@@ -1,11 +1,57 @@
-import { useState, useEffect, useCallback } from 'react';
-import { PencilLine, History } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  PencilLine, History, LogOut, Clock, GitCommit, ExternalLink,
+  RotateCcw, ChevronsDownUp, ChevronsUpDown, Layers, CheckCircle2, PanelLeftClose,
+  Rocket, Eye, Globe, AlertTriangle,
+} from 'lucide-react';
 import { api, getToken, getUser } from './lib/api';
 import { SECTION_SCHEMA } from './lib/schema';
+import { CONTEUDO_PADRAO } from './lib/conteudoPadrao';
 import { SectionEditor } from './components/SectionEditor';
 
+// Os dois endereços do site. Homologação é onde se confere; produção é o que o
+// cliente vê. Viram link no painel para não ter que procurar o endereço fora.
+const URL_HOMOLOG = import.meta.env.VITE_SITE_URL || 'https://evolutionis.com.br/preview/';
+const URL_PROD = import.meta.env.VITE_SITE_PROD_URL || 'https://evolutionis.com.br/';
+
+// Seções que nunca foram publicadas voltam vazias da API. Em vez de mostrar
+// caixas em branco — que o operador não tem como distinguir de "o site está
+// vazio" — abrimos com o conteúdo que está no ar.
+function comPadroes(salvo) {
+  const out = {};
+  for (const chave of Object.keys(SECTION_SCHEMA)) {
+    const s = salvo?.[chave];
+    out[chave] = s && Object.keys(s).length ? { ...CONTEUDO_PADRAO[chave], ...s } : { ...CONTEUDO_PADRAO[chave] };
+  }
+  // preserva seções antigas que já foram publicadas e não estão mais no schema
+  for (const chave of Object.keys(salvo || {})) if (!(chave in out)) out[chave] = salvo[chave];
+  return out;
+}
+
+function iniciais(nome) {
+  return (nome || '?').trim().slice(0, 2).toUpperCase();
+}
+
+function quando(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const min = Math.round((Date.now() - d.getTime()) / 60000);
+  if (min < 1) return 'agora há pouco';
+  if (min < 60) return `há ${min} min`;
+  if (min < 60 * 24) return `há ${Math.round(min / 60)} h`;
+  if (min < 60 * 24 * 30) return `há ${Math.round(min / 1440)} d`;
+  return d.toLocaleDateString('pt-BR');
+}
+
 function Toast({ toast }) {
-  return <div className={`toast ${toast.show ? 'show' : ''} ${toast.type}`}>{toast.msg}</div>;
+  // Sem mensagem não existe elemento nenhum: a caixa fora da tela ainda assim
+  // aparecia como uma lasca colorida no canto e como largura extra no celular.
+  if (!toast.msg) return null;
+  return (
+    <div className={`toast ${toast.show ? 'show' : ''} ${toast.type}`} role="status">
+      {toast.msg}
+    </div>
+  );
 }
 
 export default function App() {
@@ -43,8 +89,9 @@ function Login({ onLogin, toast, showToast }) {
     <div className="login-screen">
       <Toast toast={toast} />
       <div className="login-card">
-        <h1>Painel de Conteúdo</h1>
-        <p className="sub">Entre para editar e publicar o site.</p>
+        <span className="marca-ico grande">E</span>
+        <h1>Evolutionis</h1>
+        <p className="sub">Painel de conteúdo do site.</p>
         <div className="field">
           <label>Usuário</label>
           <input value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
@@ -61,36 +108,68 @@ function Login({ onLogin, toast, showToast }) {
   );
 }
 
+const ABAS = {
+  edit: { rotulo: 'Conteúdo', icone: PencilLine, titulo: 'Conteúdo do site' },
+  versions: { rotulo: 'Versões', icone: History, titulo: 'Versões publicadas' },
+};
+
+const CHAVES = Object.keys(SECTION_SCHEMA);
+
 function Dashboard({ onLogout, toast, showToast }) {
   const [tab, setTab] = useState('edit');
   const [content, setContent] = useState({});
+  const [versoes, setVersoes] = useState(null);
+  const [estado, setEstado] = useState(null); // situação dos dois ambientes
   const [comment, setComment] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [lateral, setLateral] = useState(true);
+  // Seções longas começam fechadas: com todas abertas a página vira uma
+  // rolagem de vários metros e achar um campo custa mais que editar.
+  const [abertas, setAbertas] = useState(() => CHAVES.filter((k) => !SECTION_SCHEMA[k].recolhida));
 
   const loadCurrent = useCallback(async () => {
     try {
       const data = await api.getCurrent();
-      setContent(data.content || {});
+      setContent(comPadroes(data.content));
     } catch (e) {
       showToast(e.message, 'err');
+      // sem rede, ainda dá para ver e preparar a edição do que está no ar
+      setContent(comPadroes(null));
     }
   }, [showToast]);
 
+  const loadVersoes = useCallback(async () => {
+    try {
+      setVersoes(await api.listVersions());
+    } catch {
+      setVersoes([]); // o erro já aparece pelo carregamento do conteúdo
+    }
+  }, []);
+
+  const loadEstado = useCallback(async () => {
+    try {
+      setEstado(await api.status());
+    } catch {
+      setEstado(null); // idem: um erro só, no carregamento do conteúdo
+    }
+  }, []);
+
   useEffect(() => {
     loadCurrent();
-  }, [loadCurrent]);
+    loadVersoes();
+    loadEstado();
+  }, [loadCurrent, loadVersoes, loadEstado]);
 
-  function updateSection(key, val) {
-    setContent((c) => ({ ...c, [key]: val }));
-  }
-
+  // Publicar mexe SÓ em homologação. É de propósito: dá para errar no preview
+  // sem o cliente ver. Para o site do cliente mudar, é preciso promover.
   async function publish() {
     setPublishing(true);
     try {
       await api.publish(content, comment.trim() || undefined);
       setComment('');
-      showToast('Publicado! O deploy foi disparado no GitHub.');
-      await loadCurrent();
+      showToast('Publicado em homologação. Confira no /preview/ antes de promover.');
+      await recarrega();
     } catch (e) {
       showToast(e.message, 'err');
     } finally {
@@ -98,84 +177,350 @@ function Dashboard({ onLogout, toast, showToast }) {
     }
   }
 
+  // Leva para o site do cliente o que já está no preview. Sem versão nova: é o
+  // mesmo conteúdo, só passa a valer também em produção.
+  async function promote() {
+    const v = atualHomolog ? `v${atualHomolog.versionNum}` : 'o que está em homologação';
+    if (!confirm(
+      `Publicar ${v} no site do cliente?\n\n` +
+      'O que está em produção hoje será substituído. Confira antes no /preview/.',
+    )) return;
+
+    setPromoting(true);
+    try {
+      await api.promote();
+      showToast('Promovido. O site do cliente vai atualizar em alguns minutos.');
+      await recarrega();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  async function recarrega() {
+    await Promise.all([loadCurrent(), loadVersoes(), loadEstado()]);
+  }
+
   function logout() {
     api.logout();
     onLogout();
   }
 
+  function alterna(chave) {
+    setAbertas((a) => (a.includes(chave) ? a.filter((k) => k !== chave) : [...a, chave]));
+  }
+
+  const usuario = getUser() || '—';
+  // Cada ambiente tem a sua marca; vêm da lista porque só ela traz o autor.
+  const atualHomolog = useMemo(() => versoes?.find((v) => v.isCurrentHomolog), [versoes]);
+  const atualProd = useMemo(() => versoes?.find((v) => v.isCurrentProd), [versoes]);
+  // Nada novo para promover quando os dois apontam para a mesma versão.
+  const sincronizado = !!atualHomolog && atualHomolog.id === atualProd?.id;
+
   return (
-    <div className="wrap">
+    <div className={`app ${lateral ? '' : 'sem-lateral'}`}>
       <Toast toast={toast} />
-      <header className="top">
-        <h1>Conteúdo do site</h1>
-        <div className="who">
-          Logado como <b>{getUser() || '—'}</b> · <button className="link" onClick={logout}>sair</button>
+
+      <aside className="side">
+        <div className="side-topo">
+          <span className="marca-ico">E</span>
+          <strong>Evolutionis</strong>
+          <button className="icon-act" onClick={() => setLateral(false)} title="Recolher menu">
+            <PanelLeftClose size={16} />
+          </button>
         </div>
-      </header>
 
-      <div className="tabs">
-        <button className={`tab ${tab === 'edit' ? 'active' : ''}`} onClick={() => setTab('edit')}>
-          <PencilLine size={16} /> Editar
-        </button>
-        <button className={`tab ${tab === 'versions' ? 'active' : ''}`} onClick={() => setTab('versions')}>
-          <History size={16} /> Versões
-        </button>
-      </div>
+        <nav className="side-nav">
+          <p className="side-grupo">Painel</p>
+          {Object.entries(ABAS).map(([chave, a]) => {
+            const Ico = a.icone;
+            return (
+              <button key={chave} className={tab === chave ? 'ativo' : ''} onClick={() => setTab(chave)}>
+                <Ico size={16} /> {a.rotulo}
+              </button>
+            );
+          })}
 
-      {tab === 'edit' && (
-        <>
-          {Object.entries(SECTION_SCHEMA).map(([key, def]) => (
-            <SectionEditor
-              key={key}
-              sectionKey={key}
-              def={def}
-              data={content[key] || {}}
-              onChange={updateSection}
-              onToast={showToast}
+          <p className="side-grupo">Site</p>
+          <a className="side-item" href={URL_HOMOLOG} target="_blank" rel="noreferrer">
+            <Eye size={16} /> Homologação
+          </a>
+          <a className="side-item" href={URL_PROD} target="_blank" rel="noreferrer">
+            <Globe size={16} /> Site do cliente
+          </a>
+        </nav>
+
+        <div className="side-pe">
+          <span className="avatar">{iniciais(usuario)}</span>
+          <div className="side-quem">
+            <b>{usuario}</b>
+            <span>administrador</span>
+          </div>
+          <button className="icon-act" onClick={logout} title="Sair">
+            <LogOut size={15} />
+          </button>
+        </div>
+      </aside>
+
+      <div className="main">
+        <header className="topo">
+          <div className="topo-marca">
+            {!lateral && (
+              <button className="icon-act" onClick={() => setLateral(true)} title="Mostrar menu">
+                <PanelLeftClose size={16} style={{ transform: 'rotate(180deg)' }} />
+              </button>
+            )}
+            <span className="ws">EV</span>
+            <h1>{ABAS[tab].titulo}</h1>
+            <span className="chip">Site institucional</span>
+          </div>
+          <div className="topo-acoes">
+            <a className="btn-ghost btn-sm" href={URL_HOMOLOG} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} /> Ver a homologação
+            </a>
+          </div>
+        </header>
+
+        {tab === 'edit' && (
+          <div className="barra">
+            <span className="pill"><Layers size={13} /> {CHAVES.length} seções</span>
+            <span className="pill"><Clock size={13} /> preview {quando(atualHomolog?.createdAt)}</span>
+            <div className="barra-dir">
+              <button className="pill" onClick={() => setAbertas(CHAVES)}>
+                <ChevronsUpDown size={13} /> Abrir todas
+              </button>
+              <button className="pill" onClick={() => setAbertas([])}>
+                <ChevronsDownUp size={13} /> Fechar todas
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className={`colunas ${tab === 'edit' ? '' : 'sem-rail'}`}>
+          <div className="col-principal">
+            {tab === 'edit' && (
+              <>
+                <Metricas
+                  versoes={versoes}
+                  atualHomolog={atualHomolog}
+                  atualProd={atualProd}
+                  sincronizado={sincronizado}
+                />
+                {Object.entries(SECTION_SCHEMA).map(([key, def]) => (
+                  <SectionEditor
+                    key={key}
+                    sectionKey={key}
+                    def={def}
+                    data={content[key] || {}}
+                    aberta={abertas.includes(key)}
+                    onToggle={alterna}
+                    onChange={(k, v) => setContent((c) => ({ ...c, [k]: v }))}
+                    onToast={showToast}
+                  />
+                ))}
+              </>
+            )}
+
+            {tab === 'versions' && (
+              <Versions versoes={versoes} showToast={showToast} onChanged={recarrega} />
+            )}
+          </div>
+
+          {tab === 'edit' && (
+            <Rail
+              versoes={versoes}
+              estado={estado}
+              atualHomolog={atualHomolog}
+              atualProd={atualProd}
+              sincronizado={sincronizado}
+              onVerTudo={() => setTab('versions')}
             />
-          ))}
+          )}
+        </div>
+
+        {tab === 'edit' && (
           <div className="publish-bar">
             <input
-              placeholder="O que mudou? (ex: novo título do hero)"
+              placeholder="O que mudou? (ex: novo título do início)"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
             />
             <button className="btn-primary" onClick={publish} disabled={publishing}>
-              {publishing ? <span className="spinner" /> : 'Publicar'}
+              {publishing ? <span className="spinner" /> : <><Eye size={14} /> Publicar em homologação</>}
             </button>
+            <button
+              className="btn-promover"
+              onClick={promote}
+              disabled={promoting || !atualHomolog || sincronizado}
+              title={
+                !atualHomolog
+                  ? 'Publique em homologação antes de promover'
+                  : sincronizado
+                    ? 'O site do cliente já está com a versão do preview'
+                    : 'Levar o que está no preview para o site do cliente'
+              }
+            >
+              {promoting ? <span className="spinner" /> : <><Rocket size={14} /> Promover para produção</>}
+            </button>
+            <span className="aviso">
+              {sincronizado
+                ? 'Preview e site do cliente estão iguais.'
+                : atualHomolog
+                  ? `v${atualHomolog.versionNum} está no preview, aguardando promoção.`
+                  : 'Publicar grava uma versão nova e atualiza só o /preview/.'}
+            </span>
           </div>
-        </>
-      )}
-
-      {tab === 'versions' && <Versions showToast={showToast} onChanged={loadCurrent} />}
+        )}
+      </div>
     </div>
   );
 }
 
-function Versions({ showToast, onChanged }) {
-  const [versions, setVersions] = useState(null);
+function Metricas({ versoes, atualHomolog, atualProd, sincronizado }) {
+  if (!versoes) return null;
+
+  return (
+    <div className="metricas">
+      <div className="metrica">
+        <div className="rot"><Eye size={13} /> No preview</div>
+        <div className="linha">
+          <span className="val">{atualHomolog ? `v${atualHomolog.versionNum}` : '—'}</span>
+          {atualHomolog && !sincronizado && (
+            <span className="delta aguardando"><Clock size={12} /> a promover</span>
+          )}
+        </div>
+        <div className="sub">{atualHomolog ? quando(atualHomolog.createdAt) : 'nada publicado ainda'}</div>
+      </div>
+
+      <div className="metrica">
+        <div className="rot"><Globe size={13} /> No site do cliente</div>
+        <div className="linha">
+          <span className="val">{atualProd ? `v${atualProd.versionNum}` : '—'}</span>
+          {atualProd && sincronizado && (
+            <span className="delta ok"><CheckCircle2 size={12} /> em dia</span>
+          )}
+        </div>
+        <div className="sub">
+          {atualProd ? quando(atualProd.promotedAt || atualProd.createdAt) : 'nunca promovido'}
+        </div>
+      </div>
+
+      <div className="metrica">
+        <div className="rot"><GitCommit size={13} /> Última publicação</div>
+        <div className="linha">
+          <span className="avatar peq">{iniciais(atualHomolog?.author?.username)}</span>
+          <span className="val val-txt">{atualHomolog?.author?.username || '—'}</span>
+        </div>
+        <div className="sub">{atualHomolog?.comment || 'sem descrição'}</div>
+      </div>
+
+      <div className="metrica">
+        <div className="rot"><Layers size={13} /> Seções</div>
+        <div className="linha"><span className="val">{CHAVES.length}</span></div>
+        <div className="sub">{versoes.length} no histórico</div>
+      </div>
+    </div>
+  );
+}
+
+function Rail({ versoes, estado, atualHomolog, atualProd, sincronizado, onVerTudo }) {
+  return (
+    <aside className="rail">
+      <div className="rail-card">
+        <div className="rail-cab">
+          <h4>Os dois ambientes</h4>
+        </div>
+        <div className="rail-corpo">
+          <div className="ambiente">
+            <span className={`ponto ${atualHomolog ? 'ok' : ''}`} />
+            <div>
+              <b>Homologação</b>
+              <span className="hint">
+                {atualHomolog
+                  ? `v${atualHomolog.versionNum} · ${quando(atualHomolog.createdAt)}`
+                  : 'nada publicado'}
+              </span>
+            </div>
+            <a className="link" href={URL_HOMOLOG} target="_blank" rel="noreferrer">abrir</a>
+          </div>
+
+          <div className="ambiente">
+            <span className={`ponto ${atualProd ? 'ok' : ''}`} />
+            <div>
+              <b>Site do cliente</b>
+              <span className="hint">
+                {atualProd
+                  ? `v${atualProd.versionNum} · ${quando(atualProd.promotedAt || atualProd.createdAt)}`
+                  : 'nunca promovido'}
+              </span>
+            </div>
+            <a className="link" href={URL_PROD} target="_blank" rel="noreferrer">abrir</a>
+          </div>
+
+          {/* A única pergunta que importa antes de promover: o cliente está
+              vendo o que foi conferido no preview, ou está atrás? */}
+          {atualHomolog && !sincronizado && (
+            <p className="nota-ambiente">
+              <AlertTriangle size={13} />
+              O site do cliente está na v{atualProd ? atualProd.versionNum : '—'}. A v
+              {atualHomolog.versionNum} está no preview esperando promoção.
+            </p>
+          )}
+          {sincronizado && (
+            <p className="nota-ambiente ok">
+              <CheckCircle2 size={13} /> Os dois estão na mesma versão.
+            </p>
+          )}
+          {estado?.branches && (
+            <p className="hint branches">
+              branches: {estado.branches.homolog} → preview · {estado.branches.prod} → raiz
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="rail-card">
+        <div className="rail-cab">
+          <h4>Últimas publicações</h4>
+          <button className="link" onClick={onVerTudo}>ver todas</button>
+        </div>
+        <div className="rail-corpo">
+          {versoes === null && <p className="hint">Carregando…</p>}
+          {versoes?.length === 0 && <p className="hint">Nada publicado ainda.</p>}
+          {versoes?.slice(0, 6).map((v) => (
+            <div className="atividade" key={v.id}>
+              <span className="avatar peq">{iniciais(v.author?.username)}</span>
+              <div className="atv-txt">
+                <p>
+                  <b>{v.author?.username || 'alguém'}</b> publicou{' '}
+                  <span className="chip-mono">v{v.versionNum}</span>
+                </p>
+                <p className="hint">{v.comment || 'sem descrição'}</p>
+                <p className="hint tempo">{quando(v.createdAt)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function Versions({ versoes, showToast, onChanged }) {
   const [busyId, setBusyId] = useState(null);
 
-  const load = useCallback(async () => {
-    try {
-      setVersions(await api.listVersions());
-    } catch (e) {
-      showToast(e.message, 'err');
-      setVersions([]);
-    }
-  }, [showToast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  async function rollback(v) {
-    if (!confirm(`Restaurar a versão v${v.versionNum}? Isso cria uma nova versão com esse conteúdo e redeploya o site.`)) return;
+  // Restaurar em homologação grava uma versão nova com o conteúdo antigo — o
+  // histórico continua linear e o site do cliente não muda.
+  async function restaurar(v) {
+    if (!confirm(
+      `Restaurar a v${v.versionNum} no preview?\n\n` +
+      'Isso grava uma versão nova com esse conteúdo. O site do cliente não muda.',
+    )) return;
     setBusyId(v.id);
     try {
-      await api.rollback(v.id);
-      showToast(`Rollback para v${v.versionNum} feito! Deploy disparado.`);
-      await load();
+      await api.rollback(v.id, 'homolog');
+      showToast(`v${v.versionNum} restaurada no preview.`);
       await onChanged();
     } catch (e) {
       showToast(e.message, 'err');
@@ -184,27 +529,68 @@ function Versions({ showToast, onChanged }) {
     }
   }
 
-  if (versions === null) return <p className="empty">Carregando…</p>;
-  if (versions.length === 0) return <p className="empty">Nenhuma versão publicada ainda.</p>;
+  // Promover uma versão antiga é como se volta atrás em produção sem passar de
+  // novo pelo preview. Não cria versão nova: é o mesmo conteúdo.
+  async function promover(v) {
+    if (!confirm(
+      `Publicar a v${v.versionNum} no site do cliente?\n\n` +
+      'O que está em produção hoje será substituído.',
+    )) return;
+    setBusyId(v.id);
+    try {
+      await api.promote(v.id);
+      showToast(`v${v.versionNum} promovida para produção.`);
+      await onChanged();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (versoes === null) return <p className="empty">Carregando…</p>;
+  if (versoes.length === 0) return <p className="empty">Nenhuma versão publicada ainda.</p>;
 
   return (
-    <div>
-      {versions.map((v) => (
-        <div className="version-row" key={v.id}>
-          <div>
-            <span className="vnum">v{v.versionNum}</span>
-            {v.isCurrent && <span className="badge">atual</span>}
-            <div className="meta">
-              {v.comment || '—'} · {v.author?.username || '?'} · {new Date(v.createdAt).toLocaleString('pt-BR')}
-            </div>
-          </div>
-          <div>
-            {!v.isCurrent && (
-              <button className="btn-ghost btn-sm" onClick={() => rollback(v)} disabled={busyId === v.id}>
-                {busyId === v.id ? <span className="spinner" style={{ borderTopColor: 'var(--ink)' }} /> : 'Restaurar'}
-              </button>
+    <div className="tabela">
+      <div className="tabela-cab">
+        <span>Versão</span>
+        <span>Descrição</span>
+        <span>Autor</span>
+        <span>Quando</span>
+        <span />
+      </div>
+      {versoes.map((v) => (
+        <div className="tabela-linha" key={v.id}>
+          <span className="vnum">
+            v{v.versionNum}
+            {v.isCurrentHomolog && <span className="badge">preview</span>}
+            {v.isCurrentProd && <span className="badge prod">no ar</span>}
+          </span>
+          <span className="desc">{v.comment || 'sem descrição'}</span>
+          <span className="autor">
+            <span className="avatar peq">{iniciais(v.author?.username)}</span>
+            {v.author?.username || '?'}
+          </span>
+          <span className="hint">{new Date(v.createdAt).toLocaleString('pt-BR')}</span>
+          <span className="acao">
+            {busyId === v.id ? (
+              <span className="spinner escuro" />
+            ) : (
+              <>
+                {!v.isCurrentHomolog && (
+                  <button className="btn-ghost btn-sm" onClick={() => restaurar(v)}>
+                    <RotateCcw size={13} /> Restaurar no preview
+                  </button>
+                )}
+                {!v.isCurrentProd && (
+                  <button className="btn-ghost btn-sm" onClick={() => promover(v)}>
+                    <Rocket size={13} /> Pôr no ar
+                  </button>
+                )}
+              </>
             )}
-          </div>
+          </span>
         </div>
       ))}
     </div>

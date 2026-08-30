@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,13 +15,22 @@ import { ContentService } from './content.service';
 export class ContentController {
   constructor(private content: ContentService) {}
 
-  // Público: o site ou o admin pode ler o conteúdo atual.
+  // Público: o site ou o admin pode ler o conteúdo de um ambiente.
+  // Sem `?ambiente=` vem homologação, que é o que o painel edita.
   @Get('current')
-  getCurrent() {
-    return this.content.getCurrent();
+  getCurrent(@Query('ambiente') ambiente?: string) {
+    return this.content.getCurrent(ambiente);
   }
 
   // --- A partir daqui, tudo exige JWT válido ---
+
+  // Situação dos dois ambientes de uma vez: o que está no preview, o que está
+  // no ar para o cliente, e se são a mesma versão.
+  @UseGuards(AuthGuard('jwt'))
+  @Get('status')
+  status() {
+    return this.content.status();
+  }
 
   @UseGuards(AuthGuard('jwt'))
   @Get('versions')
@@ -34,6 +44,7 @@ export class ContentController {
     return this.content.getVersion(id);
   }
 
+  // Publica em HOMOLOGAÇÃO. Produção não é tocada aqui.
   @UseGuards(AuthGuard('jwt'))
   @Post('publish')
   publish(
@@ -43,9 +54,22 @@ export class ContentController {
     return this.content.publish(body.sections, body.comment, req.user.userId);
   }
 
+  // Leva para PRODUÇÃO o que está em homologação. Com `versionId` no corpo,
+  // promove aquela versão específica — é como se volta produção para algo
+  // antigo sem passar de novo pelo preview.
+  @UseGuards(AuthGuard('jwt'))
+  @Post('promote')
+  promote(@Body() body?: { versionId?: string }) {
+    return this.content.promote(body?.versionId);
+  }
+
   @UseGuards(AuthGuard('jwt'))
   @Post('rollback/:versionId')
-  rollback(@Param('versionId') versionId: string, @Req() req: any) {
-    return this.content.rollback(versionId, req.user.userId);
+  rollback(
+    @Param('versionId') versionId: string,
+    @Req() req: any,
+    @Query('ambiente') ambiente?: string,
+  ) {
+    return this.content.rollback(versionId, req.user.userId, ambiente);
   }
 }

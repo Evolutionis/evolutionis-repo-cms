@@ -1,39 +1,39 @@
-import { ImageField } from './ImageField';
-import { IconPicker } from './IconPicker';
+import { ChevronDown } from 'lucide-react';
+import { Field } from './Field';
 
-export function SectionEditor({ sectionKey, def, data, onChange, onToast }) {
+// Abrir/fechar é estado do App, não daqui: é o que permite os botões
+// "abrir todas" e "fechar todas" da barra de cima agirem sobre o conjunto.
+export function SectionEditor({ sectionKey, def, data, aberta, onToggle, onChange, onToast }) {
   function setField(fieldKey, val) {
     onChange(sectionKey, { ...data, [fieldKey]: val });
   }
 
-  return (
-    <div className="section-card">
-      <h3>{def.label}</h3>
-      <p className="hint">seção <code>{sectionKey}</code></p>
+  const preenchidos = def.fields.filter((f) => {
+    const v = data[f.key];
+    return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== '';
+  }).length;
 
-      {def.fields.map((f) => (
-        <div className="field" key={f.key}>
-          <label>{f.label}</label>
-          {f.type === 'text' && (
-            <input value={data[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} />
-          )}
-          {f.type === 'textarea' && (
-            <textarea value={data[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} />
-          )}
-          {f.type === 'image' && (
-            <ImageField value={data[f.key] ?? ''} onChange={(v) => setField(f.key, v)} onToast={onToast} />
-          )}
-          {f.type === 'icon' && (
-            <IconPicker value={data[f.key] ?? ''} onChange={(v) => setField(f.key, v)} />
-          )}
-          {f.type === 'color' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="color" value={data[f.key] ?? '#000000'} onChange={(e) => setField(f.key, e.target.value)} style={{ width: 40, height: 40, padding: 0, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
-              <input type="text" value={data[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={{ flex: 1 }} placeholder="#000000" />
-            </div>
-          )}
+  return (
+    <div className={`section-card ${aberta ? '' : 'fechada'}`}>
+      <button type="button" className="section-cab" onClick={() => onToggle(sectionKey)}>
+        <span className="section-seta"><ChevronDown size={16} /></span>
+        <div className="section-tit">
+          <h3>{def.label}</h3>
+          {def.descricao && <p className="hint">{def.descricao}</p>}
         </div>
-      ))}
+        <span className="pill pill-sec">
+          {preenchidos}/{def.fields.length} campos
+        </span>
+        <code className="section-chave">{sectionKey}</code>
+      </button>
+
+      {aberta && (
+        <div className="section-corpo">
+          {def.fields.map((f) => (
+            <Field key={f.key} def={f} value={data[f.key]} onChange={(v) => setField(f.key, v)} onToast={onToast} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
