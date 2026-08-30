@@ -1,63 +1,35 @@
 import { useState, useMemo } from 'react';
-import {
-  Rocket, Star, Heart, Zap, Award, Target, TrendingUp, Briefcase,
-  Users, User, Mail, Phone, MapPin, Globe, Calendar, Clock,
-  Camera, Image, Video, Music, Headphones, Mic, Settings, Wrench,
-  ShoppingCart, ShoppingBag, CreditCard, DollarSign, Gift, Tag,
-  MessageCircle, MessageSquare, Send, Share2, ThumbsUp, Bell,
-  Shield, Lock, Key, CheckCircle, Check, Flag, Bookmark,
-  Home, Building, Store, Truck, Package, Box, Layers, Grid3x3,
-  Smartphone, Laptop, Monitor, Wifi, Cloud, Database, Code, Terminal,
-  PenTool, Edit, FileText, Folder, Search, Filter, Sliders,
-  Sun, Moon, Coffee, Compass, Map, Navigation, Anchor, Feather,
-  Instagram, Facebook, Twitter, Linkedin, Youtube, Github, X,
-} from 'lucide-react';
+import { X } from 'lucide-react';
+import { IconeSite, NOMES_ICONES } from '../lib/iconesSite';
 
-// Mapa nome -> componente. O nome (string) é o que fica salvo no content.json.
-const ICON_MAP = {
-  Rocket, Star, Heart, Zap, Award, Target, TrendingUp, Briefcase,
-  Users, User, Mail, Phone, MapPin, Globe, Calendar, Clock,
-  Camera, Image, Video, Music, Headphones, Mic, Settings, Wrench,
-  ShoppingCart, ShoppingBag, CreditCard, DollarSign, Gift, Tag,
-  MessageCircle, MessageSquare, Send, Share2, ThumbsUp, Bell,
-  Shield, Lock, Key, CheckCircle, Check, Flag, Bookmark,
-  Home, Building, Store, Truck, Package, Box, Layers, Grid3x3,
-  Smartphone, Laptop, Monitor, Wifi, Cloud, Database, Code, Terminal,
-  PenTool, Edit, FileText, Folder, Search, Filter, Sliders,
-  Sun, Moon, Coffee, Compass, Map, Navigation, Anchor, Feather,
-  Instagram, Facebook, Twitter, Linkedin, Youtube, Github,
-};
-const ICON_NAMES = Object.keys(ICON_MAP);
-
+// O seletor mostra os ícones do site, não os do lucide.
+// O painel usa lucide na sua própria interface; o conteúdo publicado, não.
 export function IconPicker({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
 
-  const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return ICON_NAMES;
-    return ICON_NAMES.filter((n) => n.toLowerCase().includes(term));
+  const filtrados = useMemo(() => {
+    const termo = q.trim().toLowerCase();
+    if (!termo) return NOMES_ICONES;
+    return NOMES_ICONES.filter((n) => n.includes(termo));
   }, [q]);
-
-  const Current = value && ICON_MAP[value] ? ICON_MAP[value] : null;
 
   return (
     <div>
       <div className="icon-field">
         <div className="icon-current">
-          {Current ? <Current size={26} /> : <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>}
+          {value && NOMES_ICONES.includes(value) ? (
+            <IconeSite nome={value} size={26} />
+          ) : (
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>
+          )}
         </div>
         <div style={{ flex: 1 }}>
           <button type="button" className="btn-ghost btn-sm" onClick={() => setOpen(true)}>
             {value ? `Ícone: ${value}` : 'Escolher ícone'}
           </button>
           {value && (
-            <button
-              type="button"
-              className="link"
-              style={{ marginLeft: 10 }}
-              onClick={() => onChange('')}
-            >
+            <button type="button" className="link" style={{ marginLeft: 10 }} onClick={() => onChange('')}>
               remover
             </button>
           )}
@@ -67,37 +39,31 @@ export function IconPicker({ value, onChange }) {
       {open && (
         <div className="modal-backdrop" onClick={() => setOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setOpen(false)}>
+            <button className="modal-close" onClick={() => setOpen(false)} aria-label="Fechar">
               <X size={20} />
             </button>
             <h3>Escolher ícone</h3>
-            <input
-              placeholder="Buscar ícone…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              autoFocus
-            />
+            <p className="hint" style={{ marginBottom: 12 }}>
+              Só estes existem no site. Qualquer outro nome faz o ícone sumir da página.
+            </p>
+            <input placeholder="Buscar ícone…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
             <div className="icon-grid">
-              {filtered.map((name) => {
-                const Ico = ICON_MAP[name];
-                if (!Ico) return null;
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    title={name}
-                    className={`icon-btn ${value === name ? 'selected' : ''}`}
-                    onClick={() => {
-                      onChange(name);
-                      setOpen(false);
-                    }}
-                  >
-                    <Ico size={20} />
-                  </button>
-                );
-              })}
+              {filtrados.map((nome) => (
+                <button
+                  key={nome}
+                  type="button"
+                  title={nome}
+                  className={`icon-btn ${value === nome ? 'selected' : ''}`}
+                  onClick={() => {
+                    onChange(nome);
+                    setOpen(false);
+                  }}
+                >
+                  <IconeSite nome={nome} size={20} />
+                </button>
+              ))}
             </div>
-            {filtered.length === 0 && <p className="empty">Nenhum ícone encontrado.</p>}
+            {filtrados.length === 0 && <p className="empty">Nenhum ícone encontrado.</p>}
           </div>
         </div>
       )}

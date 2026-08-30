@@ -2,7 +2,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { PencilLine, History } from 'lucide-react';
 import { api, getToken, getUser } from './lib/api';
 import { SECTION_SCHEMA } from './lib/schema';
+import { CONTEUDO_PADRAO } from './lib/conteudoPadrao';
 import { SectionEditor } from './components/SectionEditor';
+
+// Seções que nunca foram publicadas voltam vazias da API. Em vez de mostrar
+// caixas em branco — que o operador não tem como distinguir de "o site está
+// vazio" — abrimos com o conteúdo que está no ar.
+function comPadroes(salvo) {
+  const out = {};
+  for (const chave of Object.keys(SECTION_SCHEMA)) {
+    const s = salvo?.[chave];
+    out[chave] = s && Object.keys(s).length ? { ...CONTEUDO_PADRAO[chave], ...s } : { ...CONTEUDO_PADRAO[chave] };
+  }
+  // preserva seções antigas que já foram publicadas e não estão mais no schema
+  for (const chave of Object.keys(salvo || {})) if (!(chave in out)) out[chave] = salvo[chave];
+  return out;
+}
 
 function Toast({ toast }) {
   return <div className={`toast ${toast.show ? 'show' : ''} ${toast.type}`}>{toast.msg}</div>;
@@ -70,9 +85,11 @@ function Dashboard({ onLogout, toast, showToast }) {
   const loadCurrent = useCallback(async () => {
     try {
       const data = await api.getCurrent();
-      setContent(data.content || {});
+      setContent(comPadroes(data.content));
     } catch (e) {
       showToast(e.message, 'err');
+      // sem rede, ainda dá para ver e preparar a edição do que está no ar
+      setContent(comPadroes(null));
     }
   }, [showToast]);
 

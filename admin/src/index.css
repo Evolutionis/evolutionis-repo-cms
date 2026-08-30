@@ -77,7 +77,7 @@ header.top .who b { color: var(--ink); }
   background: var(--card); border: 1px solid var(--line); border-radius: 12px;
   padding: 22px; margin-bottom: 18px; box-shadow: var(--shadow);
 }
-.section-card h3 { font-size: 19px; margin-bottom: 2px; text-transform: capitalize; }
+.section-card h3 { font-size: 19px; margin-bottom: 2px; }
 .section-card .hint { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
 
 .publish-bar {
@@ -155,3 +155,68 @@ header.top .who b { color: var(--ink); }
 
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- seção recolhível ---------- */
+.section-cab {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  width: 100%; background: none; border: none; padding: 0; text-align: left; color: inherit;
+}
+.section-cab .hint { margin-bottom: 0; }
+.section-seta { color: var(--muted); flex-shrink: 0; transition: transform .18s; }
+.section-card.fechada .section-seta { transform: rotate(-90deg); }
+.section-corpo { margin-top: 18px; }
+
+/* ---------- listas ---------- */
+.field.lista {
+  border: 1px solid var(--line); border-radius: 11px; padding: 16px; background: rgba(0,0,0,.012);
+}
+.lista-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.lista-topo label { margin-bottom: 0; }
+.lista-ajuda { margin: 6px 0 0; }
+.lista-itens { margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+
+.lista-item { border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.lista-item.aberto { border-color: var(--accent); }
+.lista-cab { display: flex; align-items: center; gap: 4px; padding: 6px 8px 6px 6px; }
+.lista-alca { color: var(--line); flex-shrink: 0; }
+.lista-titulo {
+  flex: 1; text-align: left; background: none; border: none; padding: 5px 4px;
+  font-size: 14px; font-weight: 500; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lista-acoes { display: flex; gap: 2px; flex-shrink: 0; }
+.icon-act {
+  background: none; border: none; padding: 6px; border-radius: 7px; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.icon-act:hover:not(:disabled) { background: var(--paper); color: var(--ink); }
+.icon-act.perigo:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.lista-corpo { padding: 4px 14px 14px; border-top: 1px solid var(--line); margin-top: 2px; }
+.lista-corpo .field:last-child { margin-bottom: 0; }
+.lista-corpo .field.lista { background: var(--paper); }
+
+/* ---------- tags ---------- */
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; min-height: 26px; }
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--line);
+  border-radius: 20px; padding: 4px 6px 4px 11px; font-size: 13px;
+}
+.tag-chip button {
+  background: none; border: none; padding: 0; width: 18px; height: 18px; border-radius: 50%;
+  color: var(--muted); font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+}
+.tag-chip button:hover { background: var(--accent); color: #fff; }
+.tag-add { display: flex; gap: 8px; }
+.tag-add input { flex: 1; }
+
+/* ---------- campos diversos ---------- */
+.color-field { display: flex; gap: 8px; align-items: center; }
+.color-field input[type=color] { width: 40px; height: 40px; padding: 0; border: none; border-radius: 4px; cursor: pointer; flex-shrink: 0; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-weight: 400; cursor: pointer; }
+.check input { width: auto; }
+select {
+  width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px;
+  background: #fff; font-family: inherit; font-size: 14px; color: var(--ink);
+}
+select:focus { outline: none; border-color: var(--accent); }
+.btn-ghost svg, .btn-primary svg { vertical-align: -2px; margin-right: 4px; }
