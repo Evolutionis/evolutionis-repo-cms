@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { PencilLine, History } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { PencilLine, History, LogOut, Clock, GitCommit, User, RotateCcw } from 'lucide-react';
 import { api, getToken, getUser } from './lib/api';
 import { SECTION_SCHEMA } from './lib/schema';
 import { CONTEUDO_PADRAO } from './lib/conteudoPadrao';
@@ -20,7 +20,14 @@ function comPadroes(salvo) {
 }
 
 function Toast({ toast }) {
-  return <div className={`toast ${toast.show ? 'show' : ''} ${toast.type}`}>{toast.msg}</div>;
+  // Sem mensagem não existe elemento nenhum: a caixa fora da tela ainda assim
+  // aparecia como uma lasca colorida no canto e como largura extra no celular.
+  if (!toast.msg) return null;
+  return (
+    <div className={`toast ${toast.show ? 'show' : ''} ${toast.type}`} role="status">
+      {toast.msg}
+    </div>
+  );
 }
 
 export default function App() {
@@ -58,8 +65,8 @@ function Login({ onLogin, toast, showToast }) {
     <div className="login-screen">
       <Toast toast={toast} />
       <div className="login-card">
-        <h1>Painel de Conteúdo</h1>
-        <p className="sub">Entre para editar e publicar o site.</p>
+        <h1>Evolutionis</h1>
+        <p className="sub">Painel de conteúdo do site.</p>
         <div className="field">
           <label>Usuário</label>
           <input value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
@@ -76,9 +83,15 @@ function Login({ onLogin, toast, showToast }) {
   );
 }
 
+const ABAS = {
+  edit: { rotulo: 'Editar', icone: PencilLine, titulo: 'Conteúdo do site', sub: 'Altere o texto e publique quando estiver pronto.' },
+  versions: { rotulo: 'Versões', icone: History, titulo: 'Versões publicadas', sub: 'Cada publicação vira uma versão que pode ser restaurada.' },
+};
+
 function Dashboard({ onLogout, toast, showToast }) {
   const [tab, setTab] = useState('edit');
   const [content, setContent] = useState({});
+  const [versoes, setVersoes] = useState(null);
   const [comment, setComment] = useState('');
   const [publishing, setPublishing] = useState(false);
 
@@ -93,21 +106,27 @@ function Dashboard({ onLogout, toast, showToast }) {
     }
   }, [showToast]);
 
+  const loadVersoes = useCallback(async () => {
+    try {
+      setVersoes(await api.listVersions());
+    } catch {
+      setVersoes([]); // o erro já aparece pelo carregamento do conteúdo
+    }
+  }, []);
+
   useEffect(() => {
     loadCurrent();
-  }, [loadCurrent]);
-
-  function updateSection(key, val) {
-    setContent((c) => ({ ...c, [key]: val }));
-  }
+    loadVersoes();
+  }, [loadCurrent, loadVersoes]);
 
   async function publish() {
     setPublishing(true);
     try {
       await api.publish(content, comment.trim() || undefined);
       setComment('');
-      showToast('Publicado! O deploy foi disparado no GitHub.');
+      showToast('Publicado. O deploy foi disparado no GitHub.');
       await loadCurrent();
+      await loadVersoes();
     } catch (e) {
       showToast(e.message, 'err');
     } finally {
@@ -120,79 +139,127 @@ function Dashboard({ onLogout, toast, showToast }) {
     onLogout();
   }
 
+  const aba = ABAS[tab];
+
   return (
-    <div className="wrap">
+    <div className="app">
       <Toast toast={toast} />
-      <header className="top">
-        <h1>Conteúdo do site</h1>
-        <div className="who">
-          Logado como <b>{getUser() || '—'}</b> · <button className="link" onClick={logout}>sair</button>
+
+      <aside className="side">
+        <div className="side-marca">
+          <strong>Evolutionis</strong>
+          <span>Painel de conteúdo</span>
         </div>
-      </header>
+        <nav className="side-nav">
+          {Object.entries(ABAS).map(([chave, a]) => {
+            const Ico = a.icone;
+            return (
+              <button key={chave} className={tab === chave ? 'ativo' : ''} onClick={() => setTab(chave)}>
+                <Ico size={16} /> {a.rotulo}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="side-pe">
+          <span className="quem">Logado como</span>
+          <b>{getUser() || '—'}</b>
+          <button className="link" onClick={logout}>
+            <LogOut size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+            sair
+          </button>
+        </div>
+      </aside>
 
-      <div className="tabs">
-        <button className={`tab ${tab === 'edit' ? 'active' : ''}`} onClick={() => setTab('edit')}>
-          <PencilLine size={16} /> Editar
-        </button>
-        <button className={`tab ${tab === 'versions' ? 'active' : ''}`} onClick={() => setTab('versions')}>
-          <History size={16} /> Versões
-        </button>
-      </div>
+      <div className="main">
+        <header className="pagina-topo">
+          <h1>{aba.titulo}</h1>
+          <p>{aba.sub}</p>
+        </header>
 
-      {tab === 'edit' && (
-        <>
-          {Object.entries(SECTION_SCHEMA).map(([key, def]) => (
-            <SectionEditor
-              key={key}
-              sectionKey={key}
-              def={def}
-              data={content[key] || {}}
-              onChange={updateSection}
-              onToast={showToast}
-            />
-          ))}
+        <div className="pagina-corpo">
+          {tab === 'edit' && (
+            <>
+              <Metricas versoes={versoes} />
+              {Object.entries(SECTION_SCHEMA).map(([key, def]) => (
+                <SectionEditor
+                  key={key}
+                  sectionKey={key}
+                  def={def}
+                  data={content[key] || {}}
+                  onChange={(k, v) => setContent((c) => ({ ...c, [k]: v }))}
+                  onToast={showToast}
+                />
+              ))}
+            </>
+          )}
+
+          {tab === 'versions' && (
+            <Versions versoes={versoes} showToast={showToast} onChanged={async () => { await loadVersoes(); await loadCurrent(); }} />
+          )}
+        </div>
+
+        {tab === 'edit' && (
           <div className="publish-bar">
             <input
-              placeholder="O que mudou? (ex: novo título do hero)"
+              placeholder="O que mudou? (ex: novo título do início)"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
             />
             <button className="btn-primary" onClick={publish} disabled={publishing}>
               {publishing ? <span className="spinner" /> : 'Publicar'}
             </button>
+            <span className="aviso">Publicar grava uma nova versão e dispara o deploy do site.</span>
           </div>
-        </>
-      )}
-
-      {tab === 'versions' && <Versions showToast={showToast} onChanged={loadCurrent} />}
+        )}
+      </div>
     </div>
   );
 }
 
-function Versions({ showToast, onChanged }) {
-  const [versions, setVersions] = useState(null);
+function quando(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const min = Math.round((Date.now() - d.getTime()) / 60000);
+  if (min < 1) return 'agora há pouco';
+  if (min < 60) return `há ${min} min`;
+  if (min < 60 * 24) return `há ${Math.round(min / 60)} h`;
+  return d.toLocaleDateString('pt-BR');
+}
+
+function Metricas({ versoes }) {
+  const atual = useMemo(() => versoes?.find((v) => v.isCurrent) || versoes?.[0], [versoes]);
+  if (!versoes) return null;
+
+  return (
+    <div className="metricas">
+      <div className="metrica">
+        <div className="rot"><GitCommit size={13} /> Versão no ar</div>
+        <div className="val">{atual ? `v${atual.versionNum}` : '—'}</div>
+        <div className="sub">{versoes.length} {versoes.length === 1 ? 'publicação' : 'publicações'} no total</div>
+      </div>
+      <div className="metrica">
+        <div className="rot"><Clock size={13} /> Última publicação</div>
+        <div className="val">{quando(atual?.createdAt)}</div>
+        <div className="sub">{atual ? new Date(atual.createdAt).toLocaleString('pt-BR') : 'nada publicado ainda'}</div>
+      </div>
+      <div className="metrica">
+        <div className="rot"><User size={13} /> Por</div>
+        <div className="val">{atual?.author?.username || '—'}</div>
+        <div className="sub">{atual?.comment || 'sem descrição'}</div>
+      </div>
+    </div>
+  );
+}
+
+function Versions({ versoes, showToast, onChanged }) {
   const [busyId, setBusyId] = useState(null);
 
-  const load = useCallback(async () => {
-    try {
-      setVersions(await api.listVersions());
-    } catch (e) {
-      showToast(e.message, 'err');
-      setVersions([]);
-    }
-  }, [showToast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
   async function rollback(v) {
-    if (!confirm(`Restaurar a versão v${v.versionNum}? Isso cria uma nova versão com esse conteúdo e redeploya o site.`)) return;
+    if (!confirm(`Restaurar a versão v${v.versionNum}? Isso cria uma nova versão com esse conteúdo e republica o site.`)) return;
     setBusyId(v.id);
     try {
       await api.rollback(v.id);
-      showToast(`Rollback para v${v.versionNum} feito! Deploy disparado.`);
-      await load();
+      showToast(`Restaurada a v${v.versionNum}. Deploy disparado.`);
       await onChanged();
     } catch (e) {
       showToast(e.message, 'err');
@@ -201,24 +268,29 @@ function Versions({ showToast, onChanged }) {
     }
   }
 
-  if (versions === null) return <p className="empty">Carregando…</p>;
-  if (versions.length === 0) return <p className="empty">Nenhuma versão publicada ainda.</p>;
+  if (versoes === null) return <p className="empty">Carregando…</p>;
+  if (versoes.length === 0) return <p className="empty">Nenhuma versão publicada ainda.</p>;
 
   return (
     <div>
-      {versions.map((v) => (
+      {versoes.map((v) => (
         <div className="version-row" key={v.id}>
           <div>
             <span className="vnum">v{v.versionNum}</span>
-            {v.isCurrent && <span className="badge">atual</span>}
+            {v.isCurrent && <span className="badge">no ar</span>}
+            <div className="titulo">{v.comment || 'sem descrição'}</div>
             <div className="meta">
-              {v.comment || '—'} · {v.author?.username || '?'} · {new Date(v.createdAt).toLocaleString('pt-BR')}
+              {v.author?.username || '?'} · {new Date(v.createdAt).toLocaleString('pt-BR')}
             </div>
           </div>
           <div>
             {!v.isCurrent && (
               <button className="btn-ghost btn-sm" onClick={() => rollback(v)} disabled={busyId === v.id}>
-                {busyId === v.id ? <span className="spinner" style={{ borderTopColor: 'var(--ink)' }} /> : 'Restaurar'}
+                {busyId === v.id ? (
+                  <span className="spinner" style={{ borderColor: 'rgba(30,78,121,.3)', borderTopColor: 'var(--brand)' }} />
+                ) : (
+                  <><RotateCcw size={13} /> Restaurar</>
+                )}
               </button>
             )}
           </div>
