@@ -1,27 +1,30 @@
-import { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Field } from './Field';
 
-export function SectionEditor({ sectionKey, def, data, onChange, onToast }) {
-  // Seções longas (serviços tem 6 itens) fechadas por padrão, senão a página
-  // vira uma rolagem de vários metros e achar um campo custa mais que editar.
-  const [aberta, setAberta] = useState(!def.recolhida);
-
+// Abrir/fechar é estado do App, não daqui: é o que permite os botões
+// "abrir todas" e "fechar todas" da barra de cima agirem sobre o conjunto.
+export function SectionEditor({ sectionKey, def, data, aberta, onToggle, onChange, onToast }) {
   function setField(fieldKey, val) {
     onChange(sectionKey, { ...data, [fieldKey]: val });
   }
 
+  const preenchidos = def.fields.filter((f) => {
+    const v = data[f.key];
+    return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== '';
+  }).length;
+
   return (
     <div className={`section-card ${aberta ? '' : 'fechada'}`}>
-      <button type="button" className="section-cab" onClick={() => setAberta((a) => !a)}>
-        <div>
+      <button type="button" className="section-cab" onClick={() => onToggle(sectionKey)}>
+        <span className="section-seta"><ChevronDown size={16} /></span>
+        <div className="section-tit">
           <h3>{def.label}</h3>
-          <p className="hint">
-            seção <code>{sectionKey}</code>
-            {def.descricao ? ` · ${def.descricao}` : ''}
-          </p>
+          {def.descricao && <p className="hint">{def.descricao}</p>}
         </div>
-        <ChevronDown size={18} className="section-seta" />
+        <span className="pill pill-sec">
+          {preenchidos}/{def.fields.length} campos
+        </span>
+        <code className="section-chave">{sectionKey}</code>
       </button>
 
       {aberta && (

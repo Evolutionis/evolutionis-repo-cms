@@ -1,9 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { PencilLine, History, LogOut, Clock, GitCommit, User, RotateCcw } from 'lucide-react';
+import {
+  PencilLine, History, LogOut, Clock, GitCommit, ExternalLink,
+  RotateCcw, ChevronsDownUp, ChevronsUpDown, Layers, CheckCircle2, PanelLeftClose,
+} from 'lucide-react';
 import { api, getToken, getUser } from './lib/api';
 import { SECTION_SCHEMA } from './lib/schema';
 import { CONTEUDO_PADRAO } from './lib/conteudoPadrao';
 import { SectionEditor } from './components/SectionEditor';
+
+// Onde o site está publicado. Vira link no painel para conferir o resultado
+// sem sair para o navegador procurar o endereço.
+const URL_SITE = import.meta.env.VITE_SITE_URL || 'https://evolutionis.com.br/preview/';
 
 // Seções que nunca foram publicadas voltam vazias da API. Em vez de mostrar
 // caixas em branco — que o operador não tem como distinguir de "o site está
@@ -17,6 +24,21 @@ function comPadroes(salvo) {
   // preserva seções antigas que já foram publicadas e não estão mais no schema
   for (const chave of Object.keys(salvo || {})) if (!(chave in out)) out[chave] = salvo[chave];
   return out;
+}
+
+function iniciais(nome) {
+  return (nome || '?').trim().slice(0, 2).toUpperCase();
+}
+
+function quando(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const min = Math.round((Date.now() - d.getTime()) / 60000);
+  if (min < 1) return 'agora há pouco';
+  if (min < 60) return `há ${min} min`;
+  if (min < 60 * 24) return `há ${Math.round(min / 60)} h`;
+  if (min < 60 * 24 * 30) return `há ${Math.round(min / 1440)} d`;
+  return d.toLocaleDateString('pt-BR');
 }
 
 function Toast({ toast }) {
@@ -65,6 +87,7 @@ function Login({ onLogin, toast, showToast }) {
     <div className="login-screen">
       <Toast toast={toast} />
       <div className="login-card">
+        <span className="marca-ico grande">E</span>
         <h1>Evolutionis</h1>
         <p className="sub">Painel de conteúdo do site.</p>
         <div className="field">
@@ -84,9 +107,11 @@ function Login({ onLogin, toast, showToast }) {
 }
 
 const ABAS = {
-  edit: { rotulo: 'Editar', icone: PencilLine, titulo: 'Conteúdo do site', sub: 'Altere o texto e publique quando estiver pronto.' },
-  versions: { rotulo: 'Versões', icone: History, titulo: 'Versões publicadas', sub: 'Cada publicação vira uma versão que pode ser restaurada.' },
+  edit: { rotulo: 'Conteúdo', icone: PencilLine, titulo: 'Conteúdo do site' },
+  versions: { rotulo: 'Versões', icone: History, titulo: 'Versões publicadas' },
 };
+
+const CHAVES = Object.keys(SECTION_SCHEMA);
 
 function Dashboard({ onLogout, toast, showToast }) {
   const [tab, setTab] = useState('edit');
@@ -94,6 +119,10 @@ function Dashboard({ onLogout, toast, showToast }) {
   const [versoes, setVersoes] = useState(null);
   const [comment, setComment] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [lateral, setLateral] = useState(true);
+  // Seções longas começam fechadas: com todas abertas a página vira uma
+  // rolagem de vários metros e achar um campo custa mais que editar.
+  const [abertas, setAbertas] = useState(() => CHAVES.filter((k) => !SECTION_SCHEMA[k].recolhida));
 
   const loadCurrent = useCallback(async () => {
     try {
@@ -139,18 +168,28 @@ function Dashboard({ onLogout, toast, showToast }) {
     onLogout();
   }
 
-  const aba = ABAS[tab];
+  function alterna(chave) {
+    setAbertas((a) => (a.includes(chave) ? a.filter((k) => k !== chave) : [...a, chave]));
+  }
+
+  const usuario = getUser() || '—';
+  const atual = useMemo(() => versoes?.find((v) => v.isCurrent) || versoes?.[0], [versoes]);
 
   return (
-    <div className="app">
+    <div className={`app ${lateral ? '' : 'sem-lateral'}`}>
       <Toast toast={toast} />
 
       <aside className="side">
-        <div className="side-marca">
+        <div className="side-topo">
+          <span className="marca-ico">E</span>
           <strong>Evolutionis</strong>
-          <span>Painel de conteúdo</span>
+          <button className="icon-act" onClick={() => setLateral(false)} title="Recolher menu">
+            <PanelLeftClose size={16} />
+          </button>
         </div>
+
         <nav className="side-nav">
+          <p className="side-grupo">Painel</p>
           {Object.entries(ABAS).map(([chave, a]) => {
             const Ico = a.icone;
             return (
@@ -159,43 +198,92 @@ function Dashboard({ onLogout, toast, showToast }) {
               </button>
             );
           })}
+
+          <p className="side-grupo">Site</p>
+          <a className="side-item" href={URL_SITE} target="_blank" rel="noreferrer">
+            <ExternalLink size={16} /> Abrir o site
+          </a>
         </nav>
+
         <div className="side-pe">
-          <span className="quem">Logado como</span>
-          <b>{getUser() || '—'}</b>
-          <button className="link" onClick={logout}>
-            <LogOut size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
-            sair
+          <span className="avatar">{iniciais(usuario)}</span>
+          <div className="side-quem">
+            <b>{usuario}</b>
+            <span>administrador</span>
+          </div>
+          <button className="icon-act" onClick={logout} title="Sair">
+            <LogOut size={15} />
           </button>
         </div>
       </aside>
 
       <div className="main">
-        <header className="pagina-topo">
-          <h1>{aba.titulo}</h1>
-          <p>{aba.sub}</p>
+        <header className="topo">
+          <div className="topo-marca">
+            {!lateral && (
+              <button className="icon-act" onClick={() => setLateral(true)} title="Mostrar menu">
+                <PanelLeftClose size={16} style={{ transform: 'rotate(180deg)' }} />
+              </button>
+            )}
+            <span className="ws">EV</span>
+            <h1>{ABAS[tab].titulo}</h1>
+            <span className="chip">Site institucional</span>
+          </div>
+          <div className="topo-acoes">
+            <a className="btn-ghost btn-sm" href={URL_SITE} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} /> Ver o site
+            </a>
+          </div>
         </header>
 
-        <div className="pagina-corpo">
-          {tab === 'edit' && (
-            <>
-              <Metricas versoes={versoes} />
-              {Object.entries(SECTION_SCHEMA).map(([key, def]) => (
-                <SectionEditor
-                  key={key}
-                  sectionKey={key}
-                  def={def}
-                  data={content[key] || {}}
-                  onChange={(k, v) => setContent((c) => ({ ...c, [k]: v }))}
-                  onToast={showToast}
-                />
-              ))}
-            </>
-          )}
+        {tab === 'edit' && (
+          <div className="barra">
+            <span className="pill"><Layers size={13} /> {CHAVES.length} seções</span>
+            <span className="pill"><Clock size={13} /> publicado {quando(atual?.createdAt)}</span>
+            <div className="barra-dir">
+              <button className="pill" onClick={() => setAbertas(CHAVES)}>
+                <ChevronsUpDown size={13} /> Abrir todas
+              </button>
+              <button className="pill" onClick={() => setAbertas([])}>
+                <ChevronsDownUp size={13} /> Fechar todas
+              </button>
+            </div>
+          </div>
+        )}
 
-          {tab === 'versions' && (
-            <Versions versoes={versoes} showToast={showToast} onChanged={async () => { await loadVersoes(); await loadCurrent(); }} />
-          )}
+        <div className={`colunas ${tab === 'edit' ? '' : 'sem-rail'}`}>
+          <div className="col-principal">
+            {tab === 'edit' && (
+              <>
+                <Metricas versoes={versoes} atual={atual} />
+                {Object.entries(SECTION_SCHEMA).map(([key, def]) => (
+                  <SectionEditor
+                    key={key}
+                    sectionKey={key}
+                    def={def}
+                    data={content[key] || {}}
+                    aberta={abertas.includes(key)}
+                    onToggle={alterna}
+                    onChange={(k, v) => setContent((c) => ({ ...c, [k]: v }))}
+                    onToast={showToast}
+                  />
+                ))}
+              </>
+            )}
+
+            {tab === 'versions' && (
+              <Versions
+                versoes={versoes}
+                showToast={showToast}
+                onChanged={async () => {
+                  await loadVersoes();
+                  await loadCurrent();
+                }}
+              />
+            )}
+          </div>
+
+          {tab === 'edit' && <Rail versoes={versoes} atual={atual} onVerTudo={() => setTab('versions')} />}
         </div>
 
         {tab === 'edit' && (
@@ -216,38 +304,89 @@ function Dashboard({ onLogout, toast, showToast }) {
   );
 }
 
-function quando(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  const min = Math.round((Date.now() - d.getTime()) / 60000);
-  if (min < 1) return 'agora há pouco';
-  if (min < 60) return `há ${min} min`;
-  if (min < 60 * 24) return `há ${Math.round(min / 60)} h`;
-  return d.toLocaleDateString('pt-BR');
-}
-
-function Metricas({ versoes }) {
-  const atual = useMemo(() => versoes?.find((v) => v.isCurrent) || versoes?.[0], [versoes]);
+function Metricas({ versoes, atual }) {
   if (!versoes) return null;
 
   return (
     <div className="metricas">
       <div className="metrica">
         <div className="rot"><GitCommit size={13} /> Versão no ar</div>
-        <div className="val">{atual ? `v${atual.versionNum}` : '—'}</div>
-        <div className="sub">{versoes.length} {versoes.length === 1 ? 'publicação' : 'publicações'} no total</div>
+        <div className="linha">
+          <span className="val">{atual ? `v${atual.versionNum}` : '—'}</span>
+          {atual && <span className="delta ok"><CheckCircle2 size={12} /> publicada</span>}
+        </div>
+        <div className="sub">
+          {versoes.length} {versoes.length === 1 ? 'publicação' : 'publicações'} no histórico
+        </div>
       </div>
+
       <div className="metrica">
         <div className="rot"><Clock size={13} /> Última publicação</div>
-        <div className="val">{quando(atual?.createdAt)}</div>
+        <div className="linha"><span className="val">{quando(atual?.createdAt)}</span></div>
         <div className="sub">{atual ? new Date(atual.createdAt).toLocaleString('pt-BR') : 'nada publicado ainda'}</div>
       </div>
+
       <div className="metrica">
-        <div className="rot"><User size={13} /> Por</div>
-        <div className="val">{atual?.author?.username || '—'}</div>
+        <div className="rot">Publicado por</div>
+        <div className="linha">
+          <span className="avatar peq">{iniciais(atual?.author?.username)}</span>
+          <span className="val val-txt">{atual?.author?.username || '—'}</span>
+        </div>
         <div className="sub">{atual?.comment || 'sem descrição'}</div>
       </div>
+
+      <div className="metrica">
+        <div className="rot"><Layers size={13} /> Seções</div>
+        <div className="linha"><span className="val">{CHAVES.length}</span></div>
+        <div className="sub">todas editáveis por aqui</div>
+      </div>
     </div>
+  );
+}
+
+function Rail({ versoes, atual, onVerTudo }) {
+  return (
+    <aside className="rail">
+      <div className="rail-card">
+        <div className="rail-cab">
+          <h4>Situação do site</h4>
+        </div>
+        <div className="rail-corpo">
+          <div className="ambiente">
+            <span className="ponto ok" />
+            <div>
+              <b>No ar</b>
+              <span className="hint">{atual ? `v${atual.versionNum} · ${quando(atual.createdAt)}` : 'nada publicado'}</span>
+            </div>
+            <a className="link" href={URL_SITE} target="_blank" rel="noreferrer">abrir</a>
+          </div>
+        </div>
+      </div>
+
+      <div className="rail-card">
+        <div className="rail-cab">
+          <h4>Últimas publicações</h4>
+          <button className="link" onClick={onVerTudo}>ver todas</button>
+        </div>
+        <div className="rail-corpo">
+          {versoes === null && <p className="hint">Carregando…</p>}
+          {versoes?.length === 0 && <p className="hint">Nada publicado ainda.</p>}
+          {versoes?.slice(0, 6).map((v) => (
+            <div className="atividade" key={v.id}>
+              <span className="avatar peq">{iniciais(v.author?.username)}</span>
+              <div className="atv-txt">
+                <p>
+                  <b>{v.author?.username || 'alguém'}</b> publicou{' '}
+                  <span className="chip-mono">v{v.versionNum}</span>
+                </p>
+                <p className="hint">{v.comment || 'sem descrição'}</p>
+                <p className="hint tempo">{quando(v.createdAt)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -272,28 +411,34 @@ function Versions({ versoes, showToast, onChanged }) {
   if (versoes.length === 0) return <p className="empty">Nenhuma versão publicada ainda.</p>;
 
   return (
-    <div>
+    <div className="tabela">
+      <div className="tabela-cab">
+        <span>Versão</span>
+        <span>Descrição</span>
+        <span>Autor</span>
+        <span>Quando</span>
+        <span />
+      </div>
       {versoes.map((v) => (
-        <div className="version-row" key={v.id}>
-          <div>
-            <span className="vnum">v{v.versionNum}</span>
-            {v.isCurrent && <span className="badge">no ar</span>}
-            <div className="titulo">{v.comment || 'sem descrição'}</div>
-            <div className="meta">
-              {v.author?.username || '?'} · {new Date(v.createdAt).toLocaleString('pt-BR')}
-            </div>
-          </div>
-          <div>
+        <div className="tabela-linha" key={v.id}>
+          <span className="vnum">v{v.versionNum}{v.isCurrent && <span className="badge">no ar</span>}</span>
+          <span className="desc">{v.comment || 'sem descrição'}</span>
+          <span className="autor">
+            <span className="avatar peq">{iniciais(v.author?.username)}</span>
+            {v.author?.username || '?'}
+          </span>
+          <span className="hint">{new Date(v.createdAt).toLocaleString('pt-BR')}</span>
+          <span className="acao">
             {!v.isCurrent && (
               <button className="btn-ghost btn-sm" onClick={() => rollback(v)} disabled={busyId === v.id}>
                 {busyId === v.id ? (
-                  <span className="spinner" style={{ borderColor: 'rgba(30,78,121,.3)', borderTopColor: 'var(--brand)' }} />
+                  <span className="spinner escuro" />
                 ) : (
                   <><RotateCcw size={13} /> Restaurar</>
                 )}
               </button>
             )}
-          </div>
+          </span>
         </div>
       ))}
     </div>
