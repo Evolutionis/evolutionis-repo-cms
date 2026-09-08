@@ -1,12 +1,28 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { ContentModule } from './content/content.module';
 
 @Module({
-  imports: [AuthModule, ContentModule],
+  imports: [
+    // Limite padrão para toda a API (achado A3): 60 requisições por minuto
+    // por IP. Rotas específicas (como /auth/login) sobrescrevem isto com
+    // @Throttle para um limite mais restritivo.
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60_000, limit: 60 },
+    ]),
+    AuthModule,
+    ContentModule,
+  ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Aplica o rate limit globalmente — sem isto, o ThrottlerModule só
+    // registra os limites, mas nenhuma rota é protegida de fato.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {}
