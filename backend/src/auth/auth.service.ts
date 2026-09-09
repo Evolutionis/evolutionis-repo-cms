@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma.service';
 interface TentativaLogin {
   falhas: number;
   bloqueadoAte: number | null;
+  ultimaFalha: number;
 }
 
 @Injectable()
@@ -26,9 +27,18 @@ export class AuthService {
   private readonly BLOQUEIO_BASE_MS = 30_000; // 30s
   private readonly BLOQUEIO_TETO_MS = 30 * 60_000; // 30min
 
+  // O mapa é indexado pelo username RECEBIDO, não por um usuário que exista —
+  // é o que faz o bloqueio valer igual para nome inexistente e não vazar quem
+  // existe. O efeito colateral é que quem chama a rota escolhe as chaves: uma
+  // tentativa por username diferente cria uma entrada nova a cada requisição,
+  // sem autenticação nenhuma. Sem teto, isso é um vazamento de memória que
+  // qualquer um alcança. Daí a janela de esquecimento e o limite de entradas.
+  private readonly ESQUECER_APOS_MS = 60 * 60_000; // 1h sem falhar zera a contagem
+  private readonly MAX_ENTRADAS = 10_000;
+
   async login(username: string, password: string) {
     const agora = Date.now();
-    const registro = this.tentativas.get(username);
+    const registro = this.vigente(username, agora);
 
     if (registro?.bloqueadoAte && registro.bloqueadoAte > agora) {
       throw new UnauthorizedException('Muitas tentativas. Tente novamente em alguns instantes.');
@@ -52,6 +62,23 @@ export class AuthService {
     return { access_token: token, username: user.username };
   }
 
+  /**
+   * Registro do username, ou undefined se ele já passou da janela de
+   * esquecimento. Quem errou a senha cinco vezes num dia ruim não deve carregar
+   * isso para sempre; quem está atacando não fica uma hora parado esperando.
+   */
+  private vigente(username: string, agora: number): TentativaLogin | undefined {
+    const registro = this.tentativas.get(username);
+    if (!registro) return undefined;
+
+    const bloqueado = registro.bloqueadoAte !== null && registro.bloqueadoAte > agora;
+    if (!bloqueado && agora - registro.ultimaFalha > this.ESQUECER_APOS_MS) {
+      this.tentativas.delete(username);
+      return undefined;
+    }
+    return registro;
+  }
+
   private registrarFalha(username: string, registro: TentativaLogin | undefined, agora: number) {
     const falhas = (registro?.falhas ?? 0) + 1;
     let bloqueadoAte: number | null = null;
@@ -62,6 +89,32 @@ export class AuthService {
       bloqueadoAte = agora + duracao;
     }
 
-    this.tentativas.set(username, { falhas, bloqueadoAte });
+    this.tentativas.set(username, { falhas, bloqueadoAte, ultimaFalha: agora });
+    this.podar(agora);
+  }
+
+  /**
+   * Mantém o mapa dentro do teto. Primeiro descarta o que já expirou; se ainda
+   * assim estourar, remove as entradas mais antigas — o Map do JavaScript
+   * itera na ordem de inserção, então as primeiras são as mais velhas.
+   *
+   * Descartar uma entrada não solta ninguém que esteja de castigo: o rate
+   * limit por IP continua valendo, e reconquistar o bloqueio custa outras
+   * cinco tentativas.
+   */
+  private podar(agora: number) {
+    if (this.tentativas.size <= this.MAX_ENTRADAS) return;
+
+    for (const [nome, registro] of this.tentativas) {
+      const bloqueado = registro.bloqueadoAte !== null && registro.bloqueadoAte > agora;
+      if (!bloqueado && agora - registro.ultimaFalha > this.ESQUECER_APOS_MS) {
+        this.tentativas.delete(nome);
+      }
+    }
+
+    for (const nome of this.tentativas.keys()) {
+      if (this.tentativas.size <= this.MAX_ENTRADAS) break;
+      this.tentativas.delete(nome);
+    }
   }
 }

@@ -204,6 +204,32 @@ async function testeBloqueioProgressivoPorUsername() {
   );
 }
 
+async function testeMemoriaNaoCresceSemLimite() {
+  console.log('\nA contagem por username não cresce sem limite');
+
+  const prismaFalso = { adminUser: { findUnique: async () => null } } as any;
+  const jwtFalso = { signAsync: async () => 'token' } as any;
+  const service = new AuthService(prismaFalso, jwtFalso);
+
+  // Um atacante variando o username a cada tentativa cria uma entrada nova
+  // por requisição. Sem teto nem limpeza, isso é um vazamento de memória
+  // alcançável por qualquer um, sem autenticação.
+  for (let i = 0; i < 12_000; i++) {
+    try {
+      await service.login(`usuario-${i}`, 'x');
+    } catch {
+      /* esperado */
+    }
+  }
+
+  const tamanho = (service as any).tentativas.size as number;
+  ok(
+    tamanho <= 10_000,
+    `o mapa de tentativas fica limitado (${tamanho} entradas após 12.000 usernames distintos)`,
+    `cresceu para ${tamanho} — sem teto`,
+  );
+}
+
 // -------------------------------------------------------------------- main
 
 (async () => {
@@ -212,6 +238,7 @@ async function testeBloqueioProgressivoPorUsername() {
   await testeBaldesSeparadosPorCliente();
   await testeSemTrustProxyOsBaldesSeMisturam();
   await testeBloqueioProgressivoPorUsername();
+  await testeMemoriaNaoCresceSemLimite();
 
   console.log(`\n${total - falhas}/${total} verificações passaram.`);
   process.exit(falhas > 0 ? 1 : 0);

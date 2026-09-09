@@ -72,7 +72,14 @@ A API usa **JWT (JSON Web Token)** para autenticação:
 `POST /auth/login` tem duas camadas de proteção contra força bruta:
 
 - **Rate limit por IP**: no máximo 5 requisições por minuto (via `@nestjs/throttler`, `ThrottlerGuard` aplicado globalmente com um limite padrão de 60/min para o resto da API).
-- **Bloqueio progressivo por usuário**: após 5 tentativas com o mesmo username, o login fica bloqueado por 30s, dobrando a cada nova tentativa falha (até um teto de 30min). Reinicia quando o login é bem-sucedido. Guardado em memória do processo — se o backend rodar com mais de uma instância, cada uma tem sua própria contagem.
+- **Bloqueio progressivo por usuário**: após 5 tentativas com o mesmo username, o login fica bloqueado por 30s, dobrando a cada nova tentativa falha (até um teto de 30min). Reinicia quando o login é bem-sucedido, ou depois de 1h sem novas falhas. Guardado em memória do processo — se o backend rodar com mais de uma instância, cada uma tem sua própria contagem.
+
+A contagem é indexada pelo username recebido, não por um usuário que exista — é
+o que faz o bloqueio valer igual para um nome inexistente e não revelar quais
+existem. Em troca, quem chama a rota escolhe as chaves, então o mapa tem janela
+de esquecimento (1h) e teto de 10.000 entradas: sem isso, tentar um username
+diferente a cada requisição encheria a memória do processo sem autenticação
+nenhuma.
 
 O rate limit identifica o cliente por `req.ip`. Atrás de um proxy (é o caso do
 Railway), o Express só devolve o IP real do cliente se souber quantos saltos
