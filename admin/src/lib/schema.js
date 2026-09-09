@@ -259,6 +259,13 @@ export const SECTION_SCHEMA = {
           fields: [
             { key: 'nome', label: 'Nome', type: 'text' },
             { key: 'setor', label: 'Setor (Condomínio, Empresa, Indústria)', type: 'text' },
+            {
+              key: 'logo',
+              label: 'Logotipo',
+              type: 'image',
+              ajuda:
+                'Opcional. Com logotipo, a célula mostra a marca; sem, mostra o nome e o setor em texto. Envie apenas de cliente que autorizou o uso da marca.',
+            },
           ],
         },
       },
