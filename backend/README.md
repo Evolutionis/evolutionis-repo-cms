@@ -67,6 +67,13 @@ A API usa **JWT (JSON Web Token)** para autenticação:
 2. Receber um token JWT
 3. Incluir o token no header: `Authorization: Bearer <token>`
 
+### Limite de tentativas no login
+
+`POST /auth/login` tem duas camadas de proteção contra força bruta:
+
+- **Rate limit por IP**: no máximo 5 requisições por minuto (via `@nestjs/throttler`, `ThrottlerGuard` aplicado globalmente com um limite padrão de 60/min para o resto da API).
+- **Bloqueio progressivo por usuário**: após 5 tentativas com o mesmo username, o login fica bloqueado por 30s, dobrando a cada nova tentativa falha (até um teto de 30min). Reinicia quando o login é bem-sucedido. Guardado em memória do processo — se o backend rodar com mais de uma instância, cada uma tem sua própria contagem.
+
 ## 📚 Endpoints Principais
 
 - `POST /auth/login` - Autenticar usuário
