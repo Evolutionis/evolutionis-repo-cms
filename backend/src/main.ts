@@ -1,5 +1,7 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { PROXIES_CONFIAVEIS } from './throttler.config';
 
 // Dureza defensiva, não fechamento de vulnerabilidade: sem estas variáveis
 // o comportamento do processo seria indefinido em vários pontos (JWT
@@ -33,7 +35,14 @@ function validarVariaveisObrigatorias() {
 async function bootstrap() {
   validarVariaveisObrigatorias();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // O rate limit identifica o cliente por req.ip. Sem isto, o Express devolve
+  // o endereço do peer TCP — atrás do proxy do Railway, o mesmo para todo
+  // mundo — e o limite "por IP" vira um balde único: um atacante queima as 5
+  // tentativas do minuto e o administrador legítimo leva 429 sem ter tentado.
+  // Há um teste em test/throttle-login.test.ts que demonstra esse efeito.
+  app.set('trust proxy', PROXIES_CONFIAVEIS);
 
   // CORS: libera o front do admin. Em produção, troque '*' pela URL do admin.
   app.enableCors({
