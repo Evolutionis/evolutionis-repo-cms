@@ -86,14 +86,13 @@ export const SECTION_SCHEMA = {
               key: 'alvo',
               label: 'Serviço de destino',
               type: 'select',
-              ajuda: 'Para onde o cartão rola. Tem que bater com a chave de um serviço.',
+              ajuda:
+                'Para onde o cartão rola. Tem que bater com a chave de um serviço da seção Serviços — se mudar as chaves lá, atualize esta lista, senão o cartão deixa de rolar para lugar nenhum.',
               opcoes: [
                 { valor: 'paisagismo', label: 'Paisagismo' },
                 { valor: 'dedetizacao', label: 'Dedetização' },
-                { valor: 'posobra', label: 'Limpeza pós-obra' },
-                { valor: 'fachada', label: 'Limpeza de fachada' },
-                { valor: 'piso', label: 'Tratamento de piso' },
-                { valor: 'caixadagua', label: "Caixa d'água" },
+                { valor: 'pragas', label: 'Controle de pragas' },
+                { valor: 'limpeza', label: 'Limpeza profissional' },
               ],
             },
           ],
