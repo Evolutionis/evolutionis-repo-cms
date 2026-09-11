@@ -10,11 +10,27 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Usuário do painel admin (autenticação JWT)
+// Quem pode fazer o quê no painel.
+//   EDITOR -> edita conteúdo e publica em homologação (/preview/)
+//   ADMIN  -> tudo isso, mais promover para produção e gerenciar usuários
+// Publicar em homologação é o uso do dia a dia; promover para o site do
+// cliente e mexer em quem tem acesso ficam restritos a ADMIN de propósito.
+enum AdminRole {
+  ADMIN
+  EDITOR
+}
+
+// Usuário do painel admin (autenticação JWT, com 2FA opcional por conta)
 model AdminUser {
   id           String          @id @default(uuid())
   username     String          @unique
   passwordHash String
+  role         AdminRole       @default(EDITOR)
+  // Segredo TOTP (RFC 6238) e se o 2FA está de fato ativo. O segredo fica
+  // gravado assim que a conta gera o QR code, mas só passa a valer no login
+  // depois que o dono confirma um código válido — ver AuthService.enable2fa.
+  totpSecret   String?
+  totpEnabled  Boolean         @default(false)
   createdAt    DateTime        @default(now())
   versions     ContentVersion[]
 }

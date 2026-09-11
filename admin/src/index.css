@@ -338,6 +338,19 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 /* Verde só no que está no ar para o cliente — é o estado que importa conferir. */
 .badge.prod { background: var(--ok-fundo); color: var(--ok); border-color: var(--ok-linha); }
 
+/* A tabela de usuários reaproveita o .tabela de cima, só com colunas
+   diferentes (usuário/papel/2FA/desde/ação em vez de versão/descrição/autor/
+   quando/ação). Trancado a partir de 901px de propósito: a regra de colapso
+   para celular no fim do arquivo já troca .tabela-linha para duas colunas —
+   se esta regra valesse em qualquer largura, a maior especificidade dela
+   (duas classes) venceria a media query de celular e a tabela de usuários
+   nunca colapsaria no telefone. */
+@media (min-width: 901px) {
+  .usuarios-tabela .tabela-cab, .usuarios-tabela .tabela-linha {
+    grid-template-columns: minmax(0,1fr) 150px 60px 110px 74px;
+  }
+}
+
 /* ---------------- login ---------------- */
 
 .login-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--paper); }
