@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   PencilLine, History, LogOut, Clock, GitCommit, ExternalLink,
   RotateCcw, ChevronsDownUp, ChevronsUpDown, Layers, CheckCircle2, PanelLeftClose,
-  Rocket, Eye, Globe, AlertTriangle,
+  Rocket, Eye, Globe, AlertTriangle, KeyRound, Users as IconUsuarios,
+  ShieldCheck, ShieldAlert, Plus, Trash2, X,
 } from 'lucide-react';
-import { api, getToken, getUser } from './lib/api';
+import { api, getToken, getUser, getRoleHint } from './lib/api';
 import { SECTION_SCHEMA } from './lib/schema';
 import { CONTEUDO_PADRAO } from './lib/conteudoPadrao';
 import { SectionEditor } from './components/SectionEditor';
@@ -70,16 +71,33 @@ export default function App() {
 function Login({ onLogin, toast, showToast }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  // Só aparece quando usuário+senha estão certos e a conta tem 2FA ativo —
+  // ver AuthService.login no backend, que devolve requiresTotp nesse caso
+  // sem contar como tentativa errada.
+  const [precisaTotp, setPrecisaTotp] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     if (!username || !password) return showToast('Preencha usuário e senha', 'err');
+    if (precisaTotp && !totpCode) return showToast('Informe o código do autenticador', 'err');
     setBusy(true);
     try {
-      await api.login(username, password);
+      await api.login(username, password, precisaTotp ? totpCode : undefined);
       onLogin();
     } catch (e) {
-      showToast(e.message, 'err');
+      if (e.requiresTotp) {
+        setPrecisaTotp(true);
+        showToast('Informe o código do aplicativo autenticador.');
+      } else {
+        showToast(e.message, 'err');
+        // Senha recusada depois de já ter passado da 1ª etapa: volta ao
+        // início em vez de deixar um código digitado contra credenciais erradas.
+        if (precisaTotp) {
+          setPrecisaTotp(false);
+          setTotpCode('');
+        }
+      }
     } finally {
       setBusy(false);
     }
@@ -92,17 +110,46 @@ function Login({ onLogin, toast, showToast }) {
         <span className="marca-ico grande">E</span>
         <h1>Evolutionis</h1>
         <p className="sub">Painel de conteúdo do site.</p>
-        <div className="field">
-          <label>Usuário</label>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        </div>
-        <div className="field">
-          <label>Senha</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        </div>
+        {!precisaTotp ? (
+          <>
+            <div className="field">
+              <label>Usuário</label>
+              <input autoFocus value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            </div>
+            <div className="field">
+              <label>Senha</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            </div>
+          </>
+        ) : (
+          <div className="field">
+            <label>Código do autenticador</label>
+            <input
+              autoFocus
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="000000"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
+            <p className="hint">Abra o app autenticador de {username} e digite o código de 6 dígitos.</p>
+          </div>
+        )}
         <button className="btn-primary" style={{ width: '100%' }} onClick={submit} disabled={busy}>
-          {busy ? <span className="spinner" /> : 'Entrar'}
+          {busy ? <span className="spinner" /> : precisaTotp ? 'Confirmar código' : 'Entrar'}
         </button>
+        {precisaTotp && (
+          <button
+            type="button"
+            className="link"
+            style={{ marginTop: 10 }}
+            onClick={() => { setPrecisaTotp(false); setTotpCode(''); }}
+          >
+            voltar
+          </button>
+        )}
       </div>
     </div>
   );
@@ -111,6 +158,10 @@ function Login({ onLogin, toast, showToast }) {
 const ABAS = {
   edit: { rotulo: 'Conteúdo', icone: PencilLine, titulo: 'Conteúdo do site' },
   versions: { rotulo: 'Versões', icone: History, titulo: 'Versões publicadas' },
+  // admin:true esconde o item do menu para quem não é ADMIN — o backend já
+  // recusa a rota para EDITOR (RolesGuard), isto é só não oferecer o que a
+  // pessoa não pode usar.
+  users: { rotulo: 'Usuários', icone: IconUsuarios, titulo: 'Usuários do painel', admin: true },
 };
 
 const CHAVES = Object.keys(SECTION_SCHEMA);
@@ -124,6 +175,11 @@ function Dashboard({ onLogout, toast, showToast }) {
   const [publishing, setPublishing] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [lateral, setLateral] = useState(true);
+  const [contaAberta, setContaAberta] = useState(false);
+  // getRoleHint() pinta a tela sem esperar a rede (ex: mostrar/esconder o
+  // menu "Usuários" antes do primeiro round-trip); loadPerfil() abaixo troca
+  // isto pelo valor fresco do banco assim que a resposta chega.
+  const [perfil, setPerfil] = useState({ username: getUser(), role: getRoleHint(), totpEnabled: null });
   // Seções longas começam fechadas: com todas abertas a página vira uma
   // rolagem de vários metros e achar um campo custa mais que editar.
   const [abertas, setAbertas] = useState(() => CHAVES.filter((k) => !SECTION_SCHEMA[k].recolhida));
@@ -155,11 +211,22 @@ function Dashboard({ onLogout, toast, showToast }) {
     }
   }, []);
 
+  // Papel e status do 2FA sempre frescos do banco — é o que decide se o menu
+  // "Usuários" e o botão de promover aparecem habilitados.
+  const loadPerfil = useCallback(async () => {
+    try {
+      setPerfil(await api.me());
+    } catch {
+      // se o token expirou, as outras chamadas já mostram o toast de sessão
+    }
+  }, []);
+
   useEffect(() => {
     loadCurrent();
     loadVersoes();
     loadEstado();
-  }, [loadCurrent, loadVersoes, loadEstado]);
+    loadPerfil();
+  }, [loadCurrent, loadVersoes, loadEstado, loadPerfil]);
 
   // Publicar mexe SÓ em homologação. É de propósito: dá para errar no preview
   // sem o cliente ver. Para o site do cliente mudar, é preciso promover.
@@ -211,7 +278,7 @@ function Dashboard({ onLogout, toast, showToast }) {
     setAbertas((a) => (a.includes(chave) ? a.filter((k) => k !== chave) : [...a, chave]));
   }
 
-  const usuario = getUser() || '—';
+  const usuario = perfil.username || getUser() || '—';
   // Cada ambiente tem a sua marca; vêm da lista porque só ela traz o autor.
   const atualHomolog = useMemo(() => versoes?.find((v) => v.isCurrentHomolog), [versoes]);
   const atualProd = useMemo(() => versoes?.find((v) => v.isCurrentProd), [versoes]);
@@ -234,6 +301,7 @@ function Dashboard({ onLogout, toast, showToast }) {
         <nav className="side-nav">
           <p className="side-grupo">Painel</p>
           {Object.entries(ABAS).map(([chave, a]) => {
+            if (a.admin && perfil.role !== 'ADMIN') return null;
             const Ico = a.icone;
             return (
               <button key={chave} className={tab === chave ? 'ativo' : ''} onClick={() => setTab(chave)}>
@@ -255,8 +323,11 @@ function Dashboard({ onLogout, toast, showToast }) {
           <span className="avatar">{iniciais(usuario)}</span>
           <div className="side-quem">
             <b>{usuario}</b>
-            <span>administrador</span>
+            <span>{perfil.role === 'ADMIN' ? 'administrador' : 'editor'}</span>
           </div>
+          <button className="icon-act" onClick={() => setContaAberta(true)} title="Minha conta">
+            <KeyRound size={15} />
+          </button>
           <button className="icon-act" onClick={logout} title="Sair">
             <LogOut size={15} />
           </button>
@@ -323,7 +394,11 @@ function Dashboard({ onLogout, toast, showToast }) {
             )}
 
             {tab === 'versions' && (
-              <Versions versoes={versoes} showToast={showToast} onChanged={recarrega} />
+              <Versions versoes={versoes} showToast={showToast} onChanged={recarrega} role={perfil.role} />
+            )}
+
+            {tab === 'users' && perfil.role === 'ADMIN' && (
+              <Usuarios showToast={showToast} meId={perfil.id} />
             )}
           </div>
 
@@ -352,13 +427,15 @@ function Dashboard({ onLogout, toast, showToast }) {
             <button
               className="btn-promover"
               onClick={promote}
-              disabled={promoting || !atualHomolog || sincronizado}
+              disabled={promoting || !atualHomolog || sincronizado || perfil.role !== 'ADMIN'}
               title={
-                !atualHomolog
-                  ? 'Publique em homologação antes de promover'
-                  : sincronizado
-                    ? 'O site do cliente já está com a versão do preview'
-                    : 'Levar o que está no preview para o site do cliente'
+                perfil.role !== 'ADMIN'
+                  ? 'Apenas administradores podem promover para produção'
+                  : !atualHomolog
+                    ? 'Publique em homologação antes de promover'
+                    : sincronizado
+                      ? 'O site do cliente já está com a versão do preview'
+                      : 'Levar o que está no preview para o site do cliente'
               }
             >
               {promoting ? <span className="spinner" /> : <><Rocket size={14} /> Promover para produção</>}
@@ -373,6 +450,15 @@ function Dashboard({ onLogout, toast, showToast }) {
           </div>
         )}
       </div>
+
+      {contaAberta && (
+        <Conta
+          perfil={perfil}
+          onClose={() => setContaAberta(false)}
+          showToast={showToast}
+          onAtualizarPerfil={loadPerfil}
+        />
+      )}
     </div>
   );
 }
@@ -507,7 +593,7 @@ function Rail({ versoes, estado, atualHomolog, atualProd, sincronizado, onVerTud
   );
 }
 
-function Versions({ versoes, showToast, onChanged }) {
+function Versions({ versoes, showToast, onChanged, role }) {
   const [busyId, setBusyId] = useState(null);
 
   // Restaurar em homologação grava uma versão nova com o conteúdo antigo — o
@@ -583,7 +669,10 @@ function Versions({ versoes, showToast, onChanged }) {
                     <RotateCcw size={13} /> Restaurar no preview
                   </button>
                 )}
-                {!v.isCurrentProd && (
+                {/* Promover é coisa de ADMIN (RolesGuard recusa para EDITOR no
+                    backend) — some da lista em vez de aparecer desabilitado,
+                    porque quem não pode nunca vai poder aqui. */}
+                {!v.isCurrentProd && role === 'ADMIN' && (
                   <button className="btn-ghost btn-sm" onClick={() => promover(v)}>
                     <Rocket size={13} /> Pôr no ar
                   </button>
@@ -593,6 +682,464 @@ function Versions({ versoes, showToast, onChanged }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ================================================================
+   Minha conta: troca de senha e 2FA da própria conta logada.
+   ================================================================ */
+
+function Conta({ perfil, onClose, showToast, onAtualizarPerfil }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Fechar">
+          <X size={20} />
+        </button>
+        <h3>Minha conta</h3>
+        <p className="hint" style={{ marginBottom: 18 }}>
+          {perfil.username} · {perfil.role === 'ADMIN' ? 'administrador' : 'editor'}
+        </p>
+        <TrocarSenha showToast={showToast} />
+        <div style={{ height: 1, background: 'var(--line)', margin: '22px 0' }} />
+        <DuasEtapas perfil={perfil} showToast={showToast} onAtualizarPerfil={onAtualizarPerfil} />
+      </div>
+    </div>
+  );
+}
+
+function TrocarSenha({ showToast }) {
+  const [senhaAtual, setSenhaAtual] = useState('');
+  const [novaSenha, setNovaSenha] = useState('');
+  const [confirmar, setConfirmar] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function trocar() {
+    if (!senhaAtual || !novaSenha) return showToast('Preencha a senha atual e a nova.', 'err');
+    if (novaSenha !== confirmar) return showToast('A confirmação não bate com a nova senha.', 'err');
+    setBusy(true);
+    try {
+      await api.changePassword(senhaAtual, novaSenha);
+      showToast('Senha alterada.');
+      setSenhaAtual('');
+      setNovaSenha('');
+      setConfirmar('');
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <h4 style={{ fontSize: 14, marginBottom: 12 }}>Trocar senha</h4>
+      <div className="field">
+        <label>Senha atual</label>
+        <input type="password" value={senhaAtual} onChange={(e) => setSenhaAtual(e.target.value)} autoComplete="current-password" />
+      </div>
+      <div className="field">
+        <label>Nova senha</label>
+        <input type="password" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} autoComplete="new-password" />
+        <p className="hint">Pelo menos 12 caracteres, combinando três tipos entre maiúsculas, minúsculas, números e símbolos.</p>
+      </div>
+      <div className="field">
+        <label>Confirmar nova senha</label>
+        <input
+          type="password"
+          value={confirmar}
+          onChange={(e) => setConfirmar(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && trocar()}
+          autoComplete="new-password"
+        />
+      </div>
+      <button className="btn-primary btn-sm" onClick={trocar} disabled={busy}>
+        {busy ? <span className="spinner" /> : 'Salvar nova senha'}
+      </button>
+    </div>
+  );
+}
+
+function DuasEtapas({ perfil, showToast, onAtualizarPerfil }) {
+  // { secret, qrDataUrl } enquanto o QR ainda não foi confirmado, senão null.
+  const [configurando, setConfigurando] = useState(null);
+  const [codigo, setCodigo] = useState('');
+  const [mostrarDesativar, setMostrarDesativar] = useState(false);
+  const [senhaDesativar, setSenhaDesativar] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function iniciar() {
+    setBusy(true);
+    try {
+      setConfigurando(await api.setup2fa());
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmarAtivacao() {
+    if (!codigo) return showToast('Digite o código do app autenticador.', 'err');
+    setBusy(true);
+    try {
+      await api.enable2fa(codigo);
+      showToast('Autenticação em duas etapas ativada.');
+      setConfigurando(null);
+      setCodigo('');
+      await onAtualizarPerfil();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function desativar() {
+    if (!senhaDesativar) return showToast('Digite a senha para desativar.', 'err');
+    setBusy(true);
+    try {
+      await api.disable2fa(senhaDesativar);
+      showToast('Autenticação em duas etapas desativada.');
+      setMostrarDesativar(false);
+      setSenhaDesativar('');
+      await onAtualizarPerfil();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <h4 style={{ fontSize: 14, marginBottom: 4 }}>Autenticação em duas etapas</h4>
+
+      {perfil.totpEnabled ? (
+        <>
+          <p className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+            <ShieldCheck size={14} color="var(--ok)" /> Ativada — o login pede a senha e o código do app.
+          </p>
+          {!mostrarDesativar ? (
+            <button className="btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => setMostrarDesativar(true)}>
+              Desativar
+            </button>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <div className="field">
+                <label>Confirme a senha para desativar</label>
+                <input
+                  type="password"
+                  value={senhaDesativar}
+                  onChange={(e) => setSenhaDesativar(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && desativar()}
+                  autoFocus
+                />
+              </div>
+              <button className="btn-ghost btn-sm" onClick={desativar} disabled={busy}>
+                {busy ? <span className="spinner escuro" /> : 'Confirmar desativação'}
+              </button>
+              <button
+                type="button"
+                className="link"
+                style={{ marginLeft: 12 }}
+                onClick={() => { setMostrarDesativar(false); setSenhaDesativar(''); }}
+              >
+                cancelar
+              </button>
+            </div>
+          )}
+        </>
+      ) : configurando ? (
+        <div style={{ marginTop: 8 }}>
+          <p className="hint">Escaneie no app autenticador (Google Authenticator, Authy, 1Password…):</p>
+          <img
+            src={configurando.qrDataUrl}
+            alt="QR code para configurar o 2FA"
+            width={160}
+            height={160}
+            style={{ margin: '10px 0', border: '1px solid var(--line)', borderRadius: 8 }}
+          />
+          <p className="hint">Ou digite manualmente: <code className="mono">{configurando.secret}</code></p>
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Código de confirmação</label>
+            <input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="000000"
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => e.key === 'Enter' && confirmarAtivacao()}
+              autoFocus
+            />
+          </div>
+          <button className="btn-primary btn-sm" onClick={confirmarAtivacao} disabled={busy}>
+            {busy ? <span className="spinner" /> : 'Confirmar e ativar'}
+          </button>
+          <button
+            type="button"
+            className="link"
+            style={{ marginLeft: 12 }}
+            onClick={() => { setConfigurando(null); setCodigo(''); }}
+          >
+            cancelar
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+            <ShieldAlert size={14} color="var(--espera)" /> Desativada — a conta entra só com senha.
+          </p>
+          <button className="btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={iniciar} disabled={busy}>
+            {busy ? <span className="spinner escuro" /> : 'Ativar autenticação em duas etapas'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   Usuários do painel — só ADMIN vê a aba (App.jsx já filtra o menu; o
+   backend recusa a rota para quem não é ADMIN de qualquer forma).
+   ================================================================ */
+
+function Usuarios({ showToast, meId }) {
+  const [usuarios, setUsuarios] = useState(null);
+  const [modalNovo, setModalNovo] = useState(false);
+  const [resetando, setResetando] = useState(null); // usuário cuja senha está sendo redefinida
+  const [busyId, setBusyId] = useState(null);
+
+  const carregar = useCallback(async () => {
+    try {
+      setUsuarios(await api.listUsers());
+    } catch (e) {
+      showToast(e.message, 'err');
+      setUsuarios([]);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  async function mudarPapel(u, role) {
+    setBusyId(u.id);
+    try {
+      await api.setUserRole(u.id, role);
+      showToast(`${u.username} agora é ${role === 'ADMIN' ? 'administrador' : 'editor'}.`);
+      await carregar();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function excluir(u) {
+    if (!confirm(`Excluir o usuário ${u.username}? Essa ação não pode ser desfeita.`)) return;
+    setBusyId(u.id);
+    try {
+      await api.deleteUser(u.id);
+      showToast(`${u.username} removido.`);
+      await carregar();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div>
+      <div className="barra" style={{ padding: 0, marginBottom: 12 }}>
+        <span className="pill"><IconUsuarios size={13} /> {usuarios?.length ?? '—'} usuários</span>
+        <div className="barra-dir">
+          <button className="btn-primary btn-sm" onClick={() => setModalNovo(true)}>
+            <Plus size={14} /> Novo usuário
+          </button>
+        </div>
+      </div>
+
+      {usuarios === null && <p className="empty">Carregando…</p>}
+      {usuarios?.length === 0 && <p className="empty">Nenhum usuário cadastrado.</p>}
+
+      {usuarios && usuarios.length > 0 && (
+        <div className="tabela usuarios-tabela">
+          <div className="tabela-cab">
+            <span>Usuário</span>
+            <span>Papel</span>
+            <span>2FA</span>
+            <span>Desde</span>
+            <span />
+          </div>
+          {usuarios.map((u) => (
+            <div className="tabela-linha" key={u.id}>
+              <span className="autor">
+                <span className="avatar peq">{iniciais(u.username)}</span>
+                {u.username}
+                {u.id === meId && <span className="chip" style={{ marginLeft: 6 }}>você</span>}
+              </span>
+              <span>
+                {/* Ninguém muda o próprio papel — backend recusa (UsersService.setRole) — então
+                    a própria linha mostra um selo fixo em vez de um seletor que sempre falharia. */}
+                {u.id === meId ? (
+                  <span className="badge">{u.role === 'ADMIN' ? 'administrador' : 'editor'}</span>
+                ) : (
+                  <select
+                    value={u.role}
+                    disabled={busyId === u.id}
+                    onChange={(e) => mudarPapel(u, e.target.value)}
+                    style={{ width: 'auto', padding: '5px 8px', fontSize: 13 }}
+                  >
+                    <option value="EDITOR">editor</option>
+                    <option value="ADMIN">administrador</option>
+                  </select>
+                )}
+              </span>
+              <span className="hint">
+                {u.totpEnabled ? <ShieldCheck size={14} color="var(--ok)" /> : <ShieldAlert size={14} color="var(--muted-2)" />}
+              </span>
+              <span className="hint">{new Date(u.createdAt).toLocaleDateString('pt-BR')}</span>
+              <span className="acao">
+                {busyId === u.id ? (
+                  <span className="spinner escuro" />
+                ) : u.id !== meId ? (
+                  <>
+                    <button className="icon-act" title="Redefinir senha" onClick={() => setResetando(u)}>
+                      <KeyRound size={15} />
+                    </button>
+                    <button className="icon-act perigo" title="Excluir" onClick={() => excluir(u)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </>
+                ) : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modalNovo && (
+        <NovoUsuario
+          onClose={() => setModalNovo(false)}
+          onCreated={() => { setModalNovo(false); carregar(); }}
+          showToast={showToast}
+        />
+      )}
+
+      {resetando && (
+        <ResetarSenha
+          usuario={resetando}
+          onClose={() => setResetando(null)}
+          onDone={() => { setResetando(null); carregar(); }}
+          showToast={showToast}
+        />
+      )}
+    </div>
+  );
+}
+
+function NovoUsuario({ onClose, onCreated, showToast }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('EDITOR');
+  const [busy, setBusy] = useState(false);
+
+  async function criar() {
+    if (!username || !password) return showToast('Preencha usuário e senha.', 'err');
+    setBusy(true);
+    try {
+      await api.createUser(username.trim(), password, role);
+      showToast(`Usuário ${username.trim()} criado.`);
+      onCreated();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Fechar">
+          <X size={20} />
+        </button>
+        <h3>Novo usuário</h3>
+        <div className="field">
+          <label>Usuário</label>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+        </div>
+        <div className="field">
+          <label>Senha</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+          <p className="hint">
+            Pelo menos 12 caracteres, combinando três tipos entre maiúsculas, minúsculas, números e símbolos.
+            Repasse por um canal seguro — a pessoa pode trocar depois em &quot;Minha conta&quot;.
+          </p>
+        </div>
+        <div className="field">
+          <label>Papel</label>
+          <select value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="EDITOR">Editor — publica em homologação</option>
+            <option value="ADMIN">Administrador — publica, promove e gerencia usuários</option>
+          </select>
+        </div>
+        <button className="btn-primary" style={{ width: '100%' }} onClick={criar} disabled={busy}>
+          {busy ? <span className="spinner" /> : 'Criar usuário'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ResetarSenha({ usuario, onClose, onDone, showToast }) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function salvar() {
+    if (!password) return showToast('Digite a nova senha.', 'err');
+    setBusy(true);
+    try {
+      await api.resetUserPassword(usuario.id, password);
+      showToast(`Senha de ${usuario.username} redefinida. Repasse por um canal seguro.`);
+      onDone();
+    } catch (e) {
+      showToast(e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Fechar">
+          <X size={20} />
+        </button>
+        <h3>Redefinir senha de {usuario.username}</h3>
+        <div className="field">
+          <label>Nova senha</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && salvar()}
+            autoComplete="new-password"
+            autoFocus
+          />
+          <p className="hint">
+            Pelo menos 12 caracteres, combinando três tipos entre maiúsculas, minúsculas, números e símbolos.
+            {' '}{usuario.username} vai precisar dela para entrar de novo.
+          </p>
+        </div>
+        <button className="btn-primary" style={{ width: '100%' }} onClick={salvar} disabled={busy}>
+          {busy ? <span className="spinner" /> : 'Redefinir senha'}
+        </button>
+      </div>
     </div>
   );
 }
