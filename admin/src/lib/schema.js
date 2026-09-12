@@ -358,7 +358,16 @@ export const SECTION_SCHEMA = {
     fields: [
       { key: 'sobre', label: 'Texto sobre a empresa', type: 'textarea' },
       { key: 'textoDireitos', label: 'Direitos autorais', type: 'text' },
+      // O site só vira link o que for https: (lib/sanitize.js no repositório
+      // do site); rede sem URL não ganha ícone no rodapé.
+      //
+      // Atenção: apagar o campo aqui NÃO tira o ícone do site. A mescla do
+      // site (useContent.js) ignora string vazia de propósito — senão publicar
+      // com um campo ainda em branco apagaria conteúdo que está no ar — então
+      // o valor volta a ser o padrão do defaults.js. Para realmente tirar uma
+      // rede do rodapé, é preciso esvaziá-la no defaults.js do site.
       { key: 'instagram', label: 'Instagram (URL completa)', type: 'text' },
+      { key: 'linkedin', label: 'LinkedIn (URL completa)', type: 'text' },
       { key: 'facebook', label: 'Facebook (URL completa)', type: 'text' },
     ],
   },
