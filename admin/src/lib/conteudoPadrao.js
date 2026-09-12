@@ -343,7 +343,8 @@ export const CONTEUDO_PADRAO = {
   "rodape": {
     "sobre": "Limpeza profissional, paisagismo e controle de pragas para condomínios, empresas e indústrias. Há mais de 20 anos em São Roque/SP.",
     "textoDireitos": "© 2026 Evolutionis Serviços Ltda. Todos os direitos reservados.",
-    "instagram": "",
+    "instagram": "https://www.instagram.com/evolutionis_servicos",
+    "linkedin": "https://www.linkedin.com/company/evolutionis-servico-ltda/",
     "facebook": ""
   },
   "seo": {
