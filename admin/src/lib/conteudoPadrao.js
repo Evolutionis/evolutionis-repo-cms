@@ -323,11 +323,6 @@ export const CONTEUDO_PADRAO = {
         "texto": "O atendimento personalizado da Evolutionis Serviços nos proporciona tanta confiança e tranquilidade que não sentimos necessidade de buscar novos parceiros. A empresa consegue suprir todas as nossas necessidades com excelência, agilidade e um atendimento diferenciado.",
         "nome": "Flores de Lago",
         "cargo": ""
-      },
-      {
-        "texto": "A facilidade de acompanhar todos os atendimentos diretamente pelo aplicativo me proporciona muito mais segurança e transparência em relação aos serviços executados. Tenho, em tempo real, uma visão clara de tudo o que está sendo realizado, o que transmite ainda mais confiança no trabalho da Evolutionis Serviços.",
-        "nome": "Shopping Tivoli",
-        "cargo": ""
       }
     ]
   },
