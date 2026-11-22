@@ -195,4 +195,109 @@ export class GithubService {
       .filter((f: any) => f.type === 'file')
       .map((f: any) => ({ name: f.name, publicUrl: `${publicPrefix}/${f.name}` }));
   }
+
+  // ------------------------------------------------ limpeza de imagens órfãs
+  // Tudo abaixo serve só à limpeza feita ao promover (ver limpeza-imagens.ts).
+  // Em LOCAL_SITE_PATH não há branches nem GitHub: a limpeza simplesmente não roda.
+
+  get modoLocal(): boolean {
+    return !!process.env.LOCAL_SITE_PATH;
+  }
+
+  private async chamar(metodo: string, caminho: string, corpo?: unknown): Promise<any> {
+    const res = await fetch(`${this.api}/repos/${this.owner}/${this.repo}/${caminho}`, {
+      method: metodo,
+      headers: this.headers(),
+      ...(corpo ? { body: JSON.stringify(corpo) } : {}),
+    });
+    if (!res.ok) {
+      throw new InternalServerErrorException(
+        `GitHub ${metodo} ${caminho} falhou: ${res.status} ${await res.text()}`,
+      );
+    }
+    return res.json();
+  }
+
+  /** Nomes dos arquivos de public/images/ NAQUELE branch (a lista de listImages é só da homolog). */
+  async listarNomesDeImagens(branch: string): Promise<string[]> {
+    const dir = process.env.IMAGE_DIR || 'public/images';
+    const res = await fetch(
+      `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(dir)}?ref=${branch}`,
+      { headers: this.headers() },
+    );
+    if (res.status === 404) return [];
+    if (!res.ok) {
+      throw new InternalServerErrorException(
+        `GitHub listar imagens (${branch}) falhou: ${res.status} ${await res.text()}`,
+      );
+    }
+    const data = await res.json();
+    return (Array.isArray(data) ? data : []).filter((f: any) => f.type === 'file').map((f: any) => f.name);
+  }
+
+  /** O content.json que está de fato no branch (pode ter sido corrigido à mão por PR). */
+  async lerContentDoBranch(branch: string): Promise<unknown> {
+    const res = await fetch(
+      `${this.api}/repos/${this.owner}/${this.repo}/contents/${encodeURIComponent(this.path)}?ref=${branch}`,
+      { headers: this.headers() },
+    );
+    if (res.status === 404) return {};
+    if (!res.ok) {
+      throw new InternalServerErrorException(
+        `GitHub ler content.json (${branch}) falhou: ${res.status} ${await res.text()}`,
+      );
+    }
+    const data = await res.json();
+    return JSON.parse(Buffer.from(data.content, 'base64').toString('utf-8'));
+  }
+
+  /**
+   * UM commit com o content.json novo (se `content` vier) e a remoção de
+   * arquivos de imagem. A Contents API só escreve um arquivo por commit, então
+   * isto usa a Git Data API: monta uma árvore em cima da atual, com `sha: null`
+   * nos arquivos a apagar. Um commit só = um deploy só.
+   * Sem fast-forward não há `force`: se o branch andou no meio do caminho, o
+   * PATCH falha e quem chama cai no commit simples.
+   */
+  async commitComRemocoes(
+    branch: string,
+    message: string,
+    remover: string[],
+    content?: unknown,
+  ): Promise<string> {
+    const dir = process.env.IMAGE_DIR || 'public/images';
+    const ref = await this.chamar('GET', `git/ref/heads/${encodeURIComponent(branch)}`);
+    const baseCommit = ref.object.sha as string;
+    const commit = await this.chamar('GET', `git/commits/${baseCommit}`);
+
+    const entradas: Record<string, unknown>[] = remover.map((nome) => ({
+      path: `${dir}/${nome}`,
+      mode: '100644',
+      type: 'blob',
+      sha: null,
+    }));
+    if (content !== undefined) {
+      entradas.unshift({
+        path: this.path,
+        mode: '100644',
+        type: 'blob',
+        content: JSON.stringify(content, null, 2),
+      });
+    }
+
+    const arvore = await this.chamar('POST', 'git/trees', {
+      base_tree: commit.tree.sha,
+      tree: entradas,
+    });
+    const novo = await this.chamar('POST', 'git/commits', {
+      message,
+      tree: arvore.sha,
+      parents: [baseCommit],
+    });
+    await this.chamar('PATCH', `git/refs/heads/${encodeURIComponent(branch)}`, {
+      sha: novo.sha,
+      force: false,
+    });
+    return novo.sha as string;
+  }
 }
