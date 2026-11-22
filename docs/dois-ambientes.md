@@ -87,6 +87,45 @@ A ordem importa: cada passo pressupõe o anterior.
   mesmo ambiente. Por isso `promote()` e `novaVersaoHomolog()` **desmarcam antes
   de marcar**, na mesma transação. A ordem não é decorativa.
 
+## Limpeza de imagens sem uso
+
+O painel envia a imagem assim que o arquivo é escolhido (e para os dois
+branches) e não tem como apagá-la. Quem desiste ou troca de imagem deixa um
+arquivo órfão em `public/images/`. A limpeza roda no fim de *Promover para
+produção* (e do rollback de produção), que é o único momento em que se sabe o
+que está em uso.
+
+**Variável `LIMPAR_IMAGENS`** (Railway):
+
+| valor | efeito |
+|---|---|
+| `simular` (padrão, e qualquer valor desconhecido) | só escreve no log "Apagaria em main: [...]"; nada é apagado |
+| `ligado` | apaga de verdade |
+| `desligado` | nem lista |
+
+**Uma imagem só é apagada se, ao mesmo tempo:**
+- tem o carimbo `Date.now()-` no nome (foi enviada pelo painel; arquivos
+  colocados à mão nunca são tocados);
+- foi enviada há mais de 24 horas (pode estar num rascunho ainda sem salvar);
+- não é citada (`/images/<arquivo>`) pelo conteúdo que está indo para
+  produção, pela versão atual da homologação, pelas 5 últimas versões do
+  histórico, nem pelo `content.json` real de cada branch (que pode ter sido
+  corrigido à mão por PR).
+
+**Travas:** se a lista passar de 20 arquivos, ou se nenhum conteúdo citar
+imagem alguma, nada é apagado. Qualquer erro na limpeza vira aviso no log e a
+promoção segue normalmente.
+
+**Como roda:** na `main`, o `content.json` e as remoções vão num commit só (Git
+Data API, um deploy só); na homolog, as remoções vão num commit à parte.
+
+**Limite conhecido:** reverter produção para uma versão mais antiga que as 5
+protegidas pode trazer a URL de uma imagem já apagada; o site mostra um espaço
+vazio, sem erro.
+
+**Ligar com segurança:** deixe em `simular`, promova algumas vezes, confira no
+log se a lista "Apagaria..." é só lixo, e então mude para `ligado`.
+
 ## Como conferir que ficou certo
 
 - `GET /content/status` responde com os dois ambientes e `sincronizado`.

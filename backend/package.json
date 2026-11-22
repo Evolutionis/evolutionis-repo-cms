@@ -11,7 +11,7 @@
     "prisma:migrate": "prisma migrate deploy",
     "postinstall": "prisma generate",
     "seed": "ts-node prisma/seed.ts",
-    "test": "ts-node test/throttle-login.test.ts"
+    "test": "ts-node test/throttle-login.test.ts && ts-node test/limpeza-imagens.test.ts"
   },
   "dependencies": {
     "@nestjs/cli": "^10.3.0",

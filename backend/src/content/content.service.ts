@@ -1,7 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { GithubService } from '../github/github.service';
+import {
+  VERSOES_PROTEGIDAS,
+  imagensCitadas,
+  imagensParaApagar,
+  modoLimpeza,
+} from '../github/limpeza-imagens';
 
 type ContentMap = Record<string, unknown>; // { hero: {...}, sobre: {...}, ... }
 
@@ -21,6 +27,8 @@ const AMBIENTES: Ambiente[] = ['homolog', 'prod'];
 
 @Injectable()
 export class ContentService {
+  private readonly log = new Logger(ContentService.name);
+
   constructor(
     private prisma: PrismaService,
     private github: GithubService,
@@ -123,11 +131,9 @@ export class ContentService {
       throw new BadRequestException(`A v${alvo.versionNum} já está no ar em produção.`);
     }
 
-    const sha = await this.github.commitContent(
-      alvo.content,
-      `Promove v${alvo.versionNum} para producao${alvo.comment ? `: ${alvo.comment}` : ''}`,
-      this.github.branchProd,
-    );
+    const mensagem = `Promove v${alvo.versionNum} para producao${alvo.comment ? `: ${alvo.comment}` : ''}`;
+    const limpeza = await this.planejarLimpezaDeImagens(alvo.content);
+    const sha = await this.commitProducao(alvo.content, mensagem, limpeza.prod);
 
     // Desmarcar antes de marcar: o índice único parcial da migração recusa duas
     // versões marcadas ao mesmo tempo, então a ordem aqui não é decorativa.
@@ -142,7 +148,107 @@ export class ContentService {
       }),
     ]);
 
+    // Fora do caminho crítico: a promoção já está feita. Se isto falhar, só sobra
+    // lixo na homologação, e a próxima promoção tenta de novo.
+    if (limpeza.homolog.length) {
+      try {
+        await this.github.commitComRemocoes(
+          this.github.branchHomolog,
+          'Limpa imagens sem uso (promoção)',
+          limpeza.homolog,
+        );
+      } catch (e) {
+        this.log.warn(`Limpeza de imagens na homologação falhou: ${(e as Error).message}`);
+      }
+    }
+
     return promovida;
+  }
+
+  /**
+   * Commit de produção. Com remoções a fazer, vai num commit só (content.json +
+   * imagens apagadas): um deploy só. Se esse commit falhar, cai no commit
+   * simples do content.json — a promoção nunca depende da limpeza.
+   */
+  private async commitProducao(content: unknown, mensagem: string, remover: string[]) {
+    if (remover.length) {
+      try {
+        return await this.github.commitComRemocoes(
+          this.github.branchProd,
+          mensagem,
+          remover,
+          content,
+        );
+      } catch (e) {
+        this.log.warn(
+          `Commit com remoções falhou, promovendo sem limpar: ${(e as Error).message}`,
+        );
+      }
+    }
+    return this.github.commitContent(content, mensagem, this.github.branchProd);
+  }
+
+  /**
+   * Decide quais imagens de public/images/ podem ser apagadas (ver
+   * limpeza-imagens.ts para as regras). Nunca lança: qualquer dúvida vira
+   * "não apaga nada". Em modo "simular" (o padrão) só escreve no log.
+   */
+  private async planejarLimpezaDeImagens(
+    conteudoQueVai: unknown,
+  ): Promise<{ prod: string[]; homolog: string[] }> {
+    const nada = { prod: [], homolog: [] };
+    const modo = modoLimpeza();
+    if (modo === 'desligado' || this.github.modoLocal) return nada;
+
+    try {
+      const [homologAtual, recentes, jsonProd, jsonHomolog, nomesProd, nomesHomolog] =
+        await Promise.all([
+          this.versaoAtual('homolog'),
+          this.prisma.contentVersion.findMany({
+            orderBy: { versionNum: 'desc' },
+            take: VERSOES_PROTEGIDAS,
+            select: { content: true },
+          }),
+          this.github.lerContentDoBranch(this.github.branchProd),
+          this.github.lerContentDoBranch(this.github.branchHomolog),
+          this.github.listarNomesDeImagens(this.github.branchProd),
+          this.github.listarNomesDeImagens(this.github.branchHomolog),
+        ]);
+
+      const citadas = imagensCitadas(
+        conteudoQueVai,
+        homologAtual?.content,
+        jsonProd,
+        jsonHomolog,
+        ...recentes.map((v) => v.content),
+      );
+      // Sem nenhuma imagem citada mas com arquivos na pasta, o mais provável é
+      // conteúdo vazio ou lido errado, não uma pasta toda órfã.
+      if (citadas.size === 0 && (nomesProd.length || nomesHomolog.length)) {
+        this.log.warn('Limpeza de imagens abortada: nenhum conteúdo cita imagem alguma.');
+        return nada;
+      }
+
+      const plano = {
+        prod: imagensParaApagar({ arquivos: nomesProd, citadas }),
+        homolog: imagensParaApagar({ arquivos: nomesHomolog, citadas }),
+      };
+      if (modo === 'simular') {
+        this.log.log(
+          `Limpeza de imagens (SIMULAÇÃO, nada apagado). Apagaria em ${this.github.branchProd}: ` +
+            `[${plano.prod.join(', ')}]; em ${this.github.branchHomolog}: [${plano.homolog.join(', ')}]`,
+        );
+        return nada;
+      }
+      this.log.log(
+        `Limpeza de imagens: ${plano.prod.length} em ${this.github.branchProd}, ` +
+          `${plano.homolog.length} em ${this.github.branchHomolog}.`,
+      );
+      return plano;
+    } catch (e) {
+      this.log.warn(`Limpeza de imagens ignorada: ${(e as Error).message}`);
+      return nada;
+    }
   }
 
   /** Histórico (sem o conteúdo pesado, só metadados). */
